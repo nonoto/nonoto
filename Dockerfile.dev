@@ -1,0 +1,181 @@
+# syntax=docker/dockerfile:1.7
+
+FROM debian:trixie
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+ARG USERNAME=developer
+
+# --- BuildKitのaptキャッシュ設定 ---
+#
+# aptの自動クリーンを無効化し、/var/cache/aptと /var/lib/aptのキャッシュマウントに
+# 入った .debがレイヤーや再ビルドをまたいで残るようにして、aptキャッシュを温存する。
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+      > /etc/apt/apt.conf.d/keep-cache
+
+# --- システムパッケージ ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    <<EOF
+set -eu
+apt update
+apt dist-upgrade -yq
+
+PACKAGES=$(cat <<'PKGLIST' | sed 's/#.*//'
+  build-essential
+  bubblewrap                # CodexのLinux sandboxに必要
+  ca-certificates           # HTTPS接続に必要
+  curl
+  fonts-noto-cjk            # headless chromiumのスクショ用の日本語 (CJK) フォント
+  fzf                       # Claude Codeで使用
+  git
+  gnupg                     # PostgreSQL/Redis/StripeのGPGキーのdearmorに必要
+  jq                        # Claude Codeで使用
+  libasound2                # Playwright: ALSA音声ライブラリ
+  libatk-bridge2.0-0        # Playwright: ATKブリッジ
+  libatk1.0-0               # Playwright: ATK
+  libcairo2                 # Playwright: 2Dグラフィックス
+  libcups2                  # Playwright: 印刷システム
+  libdrm2                   # Playwright: Direct Rendering Manager
+  libgbm1                   # Playwright: Generic Buffer Management
+  libnspr4                  # Playwright: Netscape Portable Runtime
+  libnss3                   # Playwright: Network Security Services
+  libpango-1.0-0            # Playwright: テキストレンダリング
+  libssl-dev                # SSL関連のビルドに必要
+  libxcomposite1            # Playwright: X11 Composite拡張
+  libxdamage1               # Playwright: X11 Damage拡張
+  libxfixes3                # Playwright: X11 Fixes拡張
+  libxkbcommon0             # Playwright: XKBキーボード処理
+  libxrandr2                # Playwright: X11 RandR拡張
+  lsb-release               # PostgreSQL/Redisのaptリポジトリ設定に必要
+  nano                      # Claude Codeで使用
+  net-tools                 # Claude Codeで使用netstat (ネットワークデバッグ用)
+  procps                    # playwright-cli kill-all用のpsを提供
+  psmisc                    # Claude Codeで使用fuser (プロセス特定用)
+  python3                   # Claude Codeのアドホックなスクリプト実行で使用
+  ripgrep                   # Claude Codeで使用
+  sudo
+  tree                      # Claude Codeで使用
+  unzip
+  vim                       # Claude Codeで使用
+  zsh
+PKGLIST
+)
+
+apt install -y --no-install-recommends $PACKAGES
+EOF
+
+# --- PostgreSQLクライアント ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg && \
+    chmod 0644 /etc/apt/keyrings/postgresql.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
+    apt update && \
+    apt install -y --no-install-recommends libpq-dev postgresql-client-18
+
+# --- mise (開発ツールバージョンマネージャー) ---
+#
+# Docker向けの推奨設定としてshims方式を使用する (PATHに /mise/shimsを含める)。
+ENV MISE_DATA_DIR="/mise"
+ENV MISE_CONFIG_DIR="/mise"
+ENV MISE_CACHE_DIR="/mise/cache"
+ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
+ENV PATH="/mise/shims:${PATH}"
+RUN curl -fsSL https://mise.run | sh
+
+# Rust、Node.js、pnpmをmise経由でインストールする。
+RUN mise install rust@1.99.1 && \
+    mise install node@26.13.1 && \
+    mise install pnpm@12.18.0
+
+# グローバルデフォルトを設定する。
+RUN mise use --global rust@1.99.1 && \
+    mise use --global node@26.13.1 && \
+    mise use --global pnpm@12.18.0
+
+# --- Wikino CLI ---
+# コンテナではキーチェーンを使えないため、トークンは設定ディレクトリのファイルに保存する。
+# 表示言語は既定で英語になるため、日本語を指定する。
+ENV WIKINO_TOKEN_STORE=file
+ENV WIKINO_LANG=ja
+ARG WIKINO_CLI_VERSION=v1.3.0
+ARG WIKINO_CLI_SHA256=4efce1d2f7064dde542f343c14d22a1d2260a73b341551b59973bcba3fac805a
+RUN WIKINO_CLI_DIR="wikino_${WIKINO_CLI_VERSION}_linux_amd64" && \
+    curl -fsSL -o /tmp/wikino.tar.gz "https://github.com/wikinoapp/wikino/releases/download/cli/${WIKINO_CLI_VERSION}/${WIKINO_CLI_DIR}.tar.gz" && \
+    echo "${WIKINO_CLI_SHA256}  /tmp/wikino.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/wikino.tar.gz -C /tmp && \
+    mv "/tmp/${WIKINO_CLI_DIR}/wikino" /usr/local/bin/wikino && \
+    chmod +x /usr/local/bin/wikino && \
+    rm -rf "/tmp/wikino.tar.gz" "/tmp/${WIKINO_CLI_DIR}"
+
+# --- GitHub CLI ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt update && \
+    apt install -y --no-install-recommends gh
+
+# --- 開発者ユーザーを作成する ---
+RUN groupadd -g ${GROUP_ID} ${USERNAME} && \
+    useradd -u ${USER_ID} -g ${GROUP_ID} -m -s /bin/zsh ${USERNAME} && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# --- miseのデータディレクトリの権限設定 ---
+RUN chown -R ${USER_ID}:${GROUP_ID} /mise
+
+# --- 1Password CLI・Wikino CLIの設定ディレクトリ ---
+# 名前付きボリュームop-config・wikino-cli-configをここにマウントする。Dockerがイメージ側の
+# 所有権を引き継ぐのはボリュームが空で新規作成されたときだけのため、`op`・`wikino` が設定を
+# 書き込めるよう開発者ユーザー所有のディレクトリを事前に用意しておく。
+RUN install -d -o ${USER_ID} -g ${GROUP_ID} /home/${USERNAME}/.config && \
+    install -d -o ${USER_ID} -g ${GROUP_ID} -m 0700 /home/${USERNAME}/.config/op && \
+    install -d -o ${USER_ID} -g ${GROUP_ID} -m 0700 /home/${USERNAME}/.config/wikino
+
+WORKDIR /workspace
+USER ${USERNAME}
+
+# --- miseのシェル設定 ---
+#
+# Docker環境ではshims方式を使用する (PATHに /mise/shimsを含めている)。
+# mise activateはshimsをバイパスしてグローバルデフォルトの直接パスをPATHに
+# 追加してしまい、ディレクトリごとのバージョン切り替えが効かなくなるため、
+# ここでは実行しない。
+RUN mise reshim
+
+# --- 1Password CLI ---
+COPY --from=1password/op:2 /usr/local/bin/op /usr/local/bin/op
+
+# --- Claude Code ---
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# --- Codex ---
+RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+# --- Playwright CLI ---
+RUN npm install -g @playwright/cli@0.1.24 && \
+    mise reshim && \
+    playwright-cli install-browser chromium
+
+# --- シェル設定 ---
+SHELL ["/bin/zsh", "-c"]
+ENV SHELL=/bin/zsh
+
+RUN touch /home/${USERNAME}/.zshrc
+
+# --- Git設定 ---
+RUN git config --global user.email "me@shimba.co" && \
+    git config --global user.name "Koji Shimba"
+
+EXPOSE 8080
+
+CMD ["/bin/zsh"]
