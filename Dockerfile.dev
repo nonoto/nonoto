@@ -88,13 +88,15 @@ ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh
 
-# Rust、Node.js、pnpmをmise経由でインストールする。
+# Rust、Go、Node.js、pnpmをmise経由でインストールする。
 RUN mise install rust@1.99.1 && \
+    mise install go@1.27.4 && \
     mise install node@26.13.1 && \
     mise install pnpm@12.18.0
 
 # グローバルデフォルトを設定する。
 RUN mise use --global rust@1.99.1 && \
+    mise use --global go@1.27.4 && \
     mise use --global node@26.13.1 && \
     mise use --global pnpm@12.18.0
 
