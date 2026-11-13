@@ -1,0 +1,18 @@
+[package]
+name = "store-comparison"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+chacha20poly1305 = "0.11.0"
+jiff = "0.2.43"
+nonoto-core = { path = "../../crates/nonoto-core" }
+rusqlite = "0.42.0"
+zeroize = "1.9.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
