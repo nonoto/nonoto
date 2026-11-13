@@ -26,11 +26,15 @@ PACKAGES=$(cat <<'PKGLIST' | sed 's/#.*//'
   build-essential
   bubblewrap                # CodexのLinux sandboxに必要
   ca-certificates           # HTTPS接続に必要
+  clang                     # GPUI: bindgenを使うクレートのビルドに必要
+  cmake                     # GPUI: Cのライブラリを同梱してビルドするクレートに必要
   curl
-  fonts-noto-cjk            # headless chromiumのスクショ用の日本語 (CJK) フォント
+  fonts-noto-cjk            # headless chromiumとGPUIのスクショ用の日本語 (CJK) フォント
   fzf                       # Claude Codeで使用
+  gcc-mingw-w64-x86-64      # Rust: Windows向け (x86_64-pc-windows-gnu) のクロスビルド
   git
   gnupg                     # PostgreSQL/Redis/StripeのGPGキーのdearmorに必要
+  imagemagick               # GPUI: 仮想ディスプレイの画面を画像に保存する (import)
   jq                        # Claude Codeで使用
   libasound2                # Playwright: ALSA音声ライブラリ
   libatk-bridge2.0-0        # Playwright: ATKブリッジ
@@ -38,19 +42,28 @@ PACKAGES=$(cat <<'PKGLIST' | sed 's/#.*//'
   libcairo2                 # Playwright: 2Dグラフィックス
   libcups2                  # Playwright: 印刷システム
   libdrm2                   # Playwright: Direct Rendering Manager
+  libfontconfig-dev         # GPUI: フォントの検索
+  libfreetype-dev           # GPUI: フォントの読み込み
   libgbm1                   # Playwright: Generic Buffer Management
   libnspr4                  # Playwright: Netscape Portable Runtime
   libnss3                   # Playwright: Network Security Services
   libpango-1.0-0            # Playwright: テキストレンダリング
   libssl-dev                # SSL関連のビルドに必要
+  libvulkan1                # GPUI: 描画に使うVulkanのローダー
+  libwayland-dev            # GPUI: Waylandのウィンドウ
+  libx11-xcb-dev            # GPUI: X11のウィンドウ
   libxcomposite1            # Playwright: X11 Composite拡張
   libxdamage1               # Playwright: X11 Damage拡張
   libxfixes3                # Playwright: X11 Fixes拡張
+  libxkbcommon-x11-dev      # GPUI: X11でのキーボード処理
   libxkbcommon0             # Playwright: XKBキーボード処理
   libxrandr2                # Playwright: X11 RandR拡張
+  libzstd-dev               # GPUI: zstdを使うクレートのビルドに必要
   lsb-release               # PostgreSQL/Redisのaptリポジトリ設定に必要
+  mesa-vulkan-drivers       # GPUI: GPUの無いコンテナでソフトウェア描画するVulkanドライバー (lavapipe)
   nano                      # Claude Codeで使用
   net-tools                 # Claude Codeで使用netstat (ネットワークデバッグ用)
+  pkg-config                # GPUI: システムのライブラリの検出
   procps                    # playwright-cli kill-all用のpsを提供
   psmisc                    # Claude Codeで使用fuser (プロセス特定用)
   python3                   # Claude Codeのアドホックなスクリプト実行で使用
@@ -59,6 +72,8 @@ PACKAGES=$(cat <<'PKGLIST' | sed 's/#.*//'
   tree                      # Claude Codeで使用
   unzip
   vim                       # Claude Codeで使用
+  xauth                     # GPUI: xvfb-runで仮想ディスプレイの認証に使う
+  xvfb                      # GPUI: コンテナでアプリを起動する仮想ディスプレイ
   zsh
 PKGLIST
 )
@@ -88,6 +103,12 @@ ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:${PATH}"
 RUN curl -fsSL https://mise.run | sh
 
+# miseはRustをrustupで入れ、rustupはツールチェーンをRUSTUP_HOMEとCARGO_HOMEに置く。
+# 既定のホームディレクトリ配下のままだと、ビルドしたrootの /root に入って開発者ユーザーから
+# 使えないため、開発者ユーザーに所有権を渡す /mise 配下に固定する。
+ENV RUSTUP_HOME="/mise/rustup"
+ENV CARGO_HOME="/mise/cargo"
+
 # Rust、Go、Node.js、pnpmをmise経由でインストールする。
 RUN mise install rust@1.99.1 && \
     mise install go@1.27.4 && \
@@ -99,6 +120,9 @@ RUN mise use --global rust@1.99.1 && \
     mise use --global go@1.27.4 && \
     mise use --global node@26.13.1 && \
     mise use --global pnpm@12.18.0
+
+# Windows向けのビルドに使うターゲットを足す。
+RUN rustup target add --toolchain 1.99.1 x86_64-pc-windows-gnu
 
 # --- Wikino CLI ---
 # コンテナではキーチェーンを使えないため、トークンは設定ディレクトリのファイルに保存する。

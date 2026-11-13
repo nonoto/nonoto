@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "spikes/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# clippyの既定のリント (clippy::all) を、警告ではなくエラーとして扱う。
+# 各クレートは `[lints] workspace = true` でこの設定を引き継ぐ。
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }

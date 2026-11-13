@@ -1,0 +1,29 @@
+[package]
+name = "nonoto-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+getrandom = "0.4.3"
+jiff = "0.2.43"
+rusqlite = { version = "0.42.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+thiserror = "2.0.21"
+uuid = { version = "1.29.2", features = ["v7"] }
+zeroize = { version = "1.9.1", features = ["zeroize_derive"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+keyring-core = "1.0.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring-core = "1.0.1"
+windows-native-keyring-store = "1.1.0"
+
+[dev-dependencies]
+keyring-core = "1.0.1"
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
