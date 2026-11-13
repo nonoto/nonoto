@@ -18,3 +18,5 @@
 /docs/README.md
 /node_modules
 /tmp
+
+/target
