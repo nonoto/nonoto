@@ -1,0 +1,2 @@
+# Cargoを介さずにrustfmtを呼ぶエディタでも、`cargo fmt` と同じ版のスタイルで整形する。
+style_edition = "2024"
