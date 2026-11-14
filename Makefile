@@ -32,3 +32,10 @@ LINES ?= 5000
 .PHONY: seed-large-page
 seed-large-page:
 	scripts/seed-large-page.sh $(LINES)
+
+# 補完の検索を確かめる短いページをまとめて作る。データの置き場はNONOTO_DATA_DIRで指定する。
+PAGES ?= 10000
+
+.PHONY: seed-pages
+seed-pages:
+	cargo run --quiet --locked -p nonoto-cli --example seed-pages -- --count $(PAGES)
