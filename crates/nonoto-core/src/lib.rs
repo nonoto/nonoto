@@ -10,6 +10,7 @@ mod keychain;
 mod page;
 mod pages;
 mod store;
+mod wikilink;
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +22,7 @@ pub use keychain::KeychainKeyStore;
 pub use page::{NewPage, Page, PageId, PageSummary, PageUpdate};
 pub use pages::Pages;
 pub use store::{PageStore, SqlCipherStore};
+pub use wikilink::{Wikilink, WikilinkQuery, complete_wikilink, find_wikilinks, wikilink_query};
 
 /// データベースのファイル名。
 const DATABASE_FILE: &str = "nonoto.db";
