@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use gpui_kit::component::Theme;
 use gpui_kit::{AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use nonoto_core::KeyStorage;
 use nonoto_desktop::PageBrowser;
@@ -31,6 +32,13 @@ fn main() -> ExitCode {
             ..Default::default()
         };
         gpui_kit::open_window(options, cx, |window, cx| {
+            // ライトとダークを、システムの外観に合わせて切り替える。
+            Theme::sync_system_appearance(Some(window), cx);
+            window
+                .observe_window_appearance(|window, cx| {
+                    Theme::sync_system_appearance(Some(window), cx)
+                })
+                .detach();
             cx.new(|cx| PageBrowser::new(pages, window, cx))
         })
         .expect("ウィンドウを開けなかった");
