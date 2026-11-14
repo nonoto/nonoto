@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-13 -->
+<!-- last_synced: 2026-11-14 -->
 
 # Nonoto
 
@@ -13,12 +13,12 @@ The Japanese [README.md](./README.md) is the canonical version, and this file is
 
 ## Layout
 
-| Directory                 | Contents                                                                    |
-| ------------------------- | --------------------------------------------------------------------------- |
-| `crates/nonoto-core`      | Page operations, the encrypted on-device store, and key storage             |
-| `crates/nonoto-cli`       | The `nonoto` command (create, list, get, and update pages; outputs JSON)    |
-| `crates/nonoto-desktop`   | The GPUI desktop app                                                        |
-| `spikes/store-comparison` | Code comparing approaches to the encrypted store                            |
+| Directory                 | Contents                                                                 |
+| ------------------------- | ------------------------------------------------------------------------ |
+| `crates/nonoto-core`      | Page operations, the encrypted on-device store, and key storage          |
+| `crates/nonoto-cli`       | The `nonoto` command (create, list, get, and update pages; outputs JSON) |
+| `crates/nonoto-desktop`   | The GPUI desktop app                                                     |
+| `spikes/store-comparison` | Code comparing approaches to the encrypted store                         |
 
 ## Developing in the dev container
 
@@ -30,14 +30,15 @@ make lint                # Lint with clippy
 make test                # Run the tests
 make build-core-windows  # Build the core for Windows
 make screenshot-desktop  # Start the desktop app on a virtual display and save the screen to tmp/
+make screenshot-editor   # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
 ```
 
 The `nonoto` command and the desktop app share environment variables for the data location and the key storage.
 
-| Variable           | Meaning                                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)                   |
-| `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere      |
+| Variable           | Meaning                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
+| `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
 
 ## Checking on a Mac
 
@@ -89,19 +90,70 @@ cargo run --release -p nonoto-desktop
 
 ### Adding test data
 
-Add data with the same environment variables you run the app with.
+Choose a data directory separate from your regular data, then add 10,000 short pages for completion searches and a 5,000-line page.
 
 ```sh
-# Create one Markdown page with thousands of lines (change the count with LINES)
+export NONOTO_DATA_DIR=/tmp/nonoto-editor-check
+
+# Create 10,000 short pages in one process (change PAGES to adjust the count)
+make seed-pages PAGES=10000
+
+# Create one page with thousands of Markdown lines (change LINES to adjust the count)
 make seed-large-page LINES=5000
 
-# Create a short page
+# Create a target for wiki links in the rendered view
 cargo run --release -p nonoto-cli -- create --title はじめに --body '# 見出し'
 ```
 
+`make seed-pages` retrieves the key and opens the database once, then adds the requested number of pages through the existing core API.
+It accepts `NONOTO_KEY_STORE` and uses the same default key storage as the app when the variable is omitted.
 If the app is open while you add data, restart it to see the new pages in the list.
 
-### Cleaning up
+## Checking the editor
+
+Run `cargo run --release -p nonoto-desktop` in the same terminal used to add the data, so the app opens the same data directory.
+
+### A large page
+
+Open "大きなページ (5000行)", press "編集" (Edit), and keep typing or scroll up and down quickly to see whether the editor stutters.
+
+### Wiki link completion
+
+Typing `[[` in the body shows title candidates.
+Continue in Japanese, such as `[[は`, and check that the text being composed stays intact and that the candidates narrow after you confirm it.
+Press Enter to choose a candidate.
+
+### Completion with 10,000 pages
+
+Type `[[検証用ページ` in Japanese in the body and check that candidates appear.
+Continue with text such as ` 000` to narrow them, use the arrow keys to move through the candidates, and press Enter to choose one.
+Check that typing and candidate updates remain responsive with at least 10,000 pages in the data directory.
+
+### List continuation
+
+Pressing Enter at the end of a `- 項目` line adds `- ` on the next line.
+Pressing Enter again on the empty item removes the marker.
+Check that the Enter that confirms the IME composition does not continue the list.
+
+### Indentation
+
+Select several lines and press Tab and Shift-Tab to check that the indentation of the selected lines changes.
+
+### Built-in features
+
+Typing `(` adds `)`.
+Check that Command-F searches the body, and that Command-Z and Command-Shift-Z undo and redo.
+
+### Wiki links in the rendered view
+
+Save a body with `[[はじめに]]` and `[[無いページ]]`, then click `はじめに` in the rendered view to move to the "はじめに" page.
+Check that `[[無いページ]]` is not a link, appears as written with its brackets, and does nothing when clicked.
+
+### VoiceOver
+
+Start VoiceOver with Command-F5, move to the body input while editing, and listen to whether the body is read aloud.
+
+## Cleaning up
 
 The location set with `NONOTO_DATA_DIR` can be deleted as a whole directory.
 Deleting the keychain item makes data encrypted with that key unreadable.
