@@ -2,6 +2,7 @@
 //!
 //! 各OSのクライアントとサーバーから共有するため、UIとCLIのクレートには依存しない。
 
+mod editing;
 mod error;
 mod key;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -12,6 +13,7 @@ mod store;
 
 use std::path::{Path, PathBuf};
 
+pub use editing::{TextEdit, continue_list, indent, outdent};
 pub use error::Error;
 pub use key::{FileKeyStore, Key, KeyStore};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
