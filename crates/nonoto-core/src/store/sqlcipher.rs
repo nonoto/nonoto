@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use jiff::Timestamp;
-use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 use zeroize::Zeroize;
 
 use super::PageStore;
@@ -99,24 +99,39 @@ impl PageStore for SqlCipherStore {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, created_at, updated_at FROM pages ORDER BY updated_at DESC, id DESC",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        rows.map(|row| {
-            let (id, title, created_at, updated_at) = row?;
-            Ok(PageSummary {
-                id: parse_id(&id)?,
-                title,
-                created_at: parse_timestamp(created_at)?,
-                updated_at: parse_timestamp(updated_at)?,
-            })
-        })
-        .collect()
+        let rows = stmt.query_map([], read_summary_row)?;
+        rows.map(|row| summary(row?)).collect()
+    }
+
+    fn search_by_title(&self, keyword: &str, limit: usize) -> Result<Vec<PageSummary>, Error> {
+        let patterns: Vec<String> = keyword.split_whitespace().map(like_pattern).collect();
+        let mut sql =
+            String::from("SELECT id, title, created_at, updated_at FROM pages WHERE title <> ''");
+        for _ in &patterns {
+            sql.push_str(" AND title LIKE ? ESCAPE '\\'");
+        }
+        sql.push_str(" ORDER BY updated_at DESC, id DESC LIMIT ?");
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params = patterns
+            .iter()
+            .map(|pattern| rusqlite::types::Value::Text(pattern.clone()))
+            .chain([rusqlite::types::Value::Integer(limit)]);
+        let rows = stmt.query_map(params_from_iter(params), read_summary_row)?;
+        rows.map(|row| summary(row?)).collect()
+    }
+
+    fn find_by_title(&self, title: &str) -> Result<Option<PageSummary>, Error> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, title, created_at, updated_at FROM pages WHERE title = ?1 \
+                 ORDER BY updated_at DESC, id DESC LIMIT 1",
+                params![title],
+                read_summary_row,
+            )
+            .optional()?;
+        row.map(summary).transpose()
     }
 
     fn get(&self, id: PageId) -> Result<Option<Page>, Error> {
@@ -168,6 +183,35 @@ fn select_page(conn: &Connection, id: PageId) -> Result<Option<Page>, Error> {
         })
     })
     .transpose()
+}
+
+/// 語を含む文字列に当てはまるLIKEのパターン。語の中の `%`・`_`・`\\` は、そのままの文字として扱う。
+fn like_pattern(word: &str) -> String {
+    let mut pattern = String::with_capacity(word.len() + 2);
+    pattern.push('%');
+    for ch in word.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    pattern.push('%');
+    pattern
+}
+
+fn read_summary_row(row: &Row<'_>) -> rusqlite::Result<(String, String, i64, i64)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+fn summary(
+    (id, title, created_at, updated_at): (String, String, i64, i64),
+) -> Result<PageSummary, Error> {
+    Ok(PageSummary {
+        id: parse_id(&id)?,
+        title,
+        created_at: parse_timestamp(created_at)?,
+        updated_at: parse_timestamp(updated_at)?,
+    })
 }
 
 fn read_page_row(row: &Row<'_>) -> rusqlite::Result<(String, String, i64, i64)> {
@@ -339,6 +383,89 @@ mod tests {
             titles,
             ["新しいページ", "古いページ"],
             "一覧の並びが期待と異なる"
+        );
+    }
+
+    #[test]
+    fn タイトルですべての語を含むページを新しい順に上限まで探す() {
+        let (_dir, mut store) = open_store();
+        for (title, millisecond) in [
+            ("Foo Bar", 1_000),
+            ("bar baz", 2_000),
+            ("はじめに", 3_000),
+            ("", 4_000),
+            ("100%_\\済み", 5_000),
+            ("fooと bar の話", 6_000),
+        ] {
+            store
+                .insert(&page(title, "本文", millisecond))
+                .expect("ページを保存できなかった");
+        }
+        let titles = |keyword: &str, limit: usize| -> Vec<String> {
+            store
+                .search_by_title(keyword, limit)
+                .expect("ページを探せなかった")
+                .into_iter()
+                .map(|summary| summary.title)
+                .collect()
+        };
+
+        assert_eq!(
+            titles("bar foo", 10),
+            ["fooと bar の話", "Foo Bar"],
+            "語の順と大文字小文字によらず、すべての語を含むページを新しい順に返していない"
+        );
+        assert_eq!(titles("じめ", 10), ["はじめに"], "日本語で探せない");
+        assert_eq!(
+            titles("", 3),
+            ["fooと bar の話", "100%_\\済み", "はじめに"],
+            "空のキーワードで、タイトルの無いページを除いた新しい順に上限まで返していない"
+        );
+        assert_eq!(
+            titles("%_\\", 10),
+            ["100%_\\済み"],
+            "記号をLIKEの特別な文字として扱った"
+        );
+        assert!(titles("_", 10).len() == 1, "`_` を任意の1文字として扱った");
+    }
+
+    #[test]
+    fn タイトルが完全に一致するページのうち新しいページを返す() {
+        let (_dir, mut store) = open_store();
+        for (title, millisecond) in [
+            ("はじめに", 1_000),
+            ("はじめに", 3_000),
+            ("はじめにの続き", 4_000),
+            ("Foo", 5_000),
+        ] {
+            store
+                .insert(&page(title, &format!("{millisecond}"), millisecond))
+                .expect("ページを保存できなかった");
+        }
+        let found = |title: &str| -> Option<String> {
+            store
+                .find_by_title(title)
+                .expect("ページを探せなかった")
+                .map(|summary| {
+                    let page = store
+                        .get(summary.id)
+                        .expect("ページを読めなかった")
+                        .expect("探したページが無い");
+                    page.body
+                })
+        };
+
+        assert_eq!(
+            found("はじめに").as_deref(),
+            Some("3000"),
+            "同じタイトルのページのうち、新しいページを返していない"
+        );
+        assert_eq!(found("はじめ"), None, "一部だけ一致するページを返した");
+        assert_eq!(found("foo"), None, "大文字と小文字を区別していない");
+        assert_eq!(
+            found("Foo").as_deref(),
+            Some("5000"),
+            "英字のタイトルで探せない"
         );
     }
 
