@@ -26,6 +26,12 @@ build-core-windows:
 screenshot-desktop:
 	scripts/screenshot-desktop.sh
 
+# 仮想ディスプレイで記法の見本のページの編集の画面を開き、ライトとダークの画面を
+# tmp/screenshot-editor-light.png と tmp/screenshot-editor-dark.png に保存する。
+.PHONY: screenshot-editor
+screenshot-editor:
+	scripts/screenshot-editor.sh
+
 # 数千行のMarkdownのページを1件作る。行数は LINES で変えられる (例: make seed-large-page LINES=10000)。
 LINES ?= 5000
 
