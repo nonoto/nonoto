@@ -146,11 +146,8 @@ fn measure(path: &Path, count: usize) -> Row {
     let file_kib = database_size(path) / 1024;
     let plaintext_found = contains_marker(path);
 
-    let mut startups: Vec<(Duration, Option<u64>)> = (0..REPEAT)
-        .map(|_| open_in_new_process(path, &key))
-        .collect();
-    startups.sort_by_key(|(elapsed, _)| *elapsed);
-    let (startup, startup_rss_kib) = startups.swap_remove(REPEAT / 2);
+    let startups = std::array::from_fn(|_| open_in_new_process(path, &key));
+    let (startup, startup_rss_kib) = startup_medians(startups);
 
     let mut store = Store::open(path, &key).expect("ストアを開けなかった");
     let extra = generate_pages(SINGLE_OPS, count);
@@ -184,6 +181,21 @@ fn measure(path: &Path, count: usize) -> Row {
         file_kib,
         plaintext_found,
     }
+}
+
+/// 時間とRSSをそれぞれの中央値にする。RSSの計測が欠けたときは、5回の中央値を出せないため `None` にする。
+fn startup_medians(samples: [(Duration, Option<u64>); REPEAT]) -> (Duration, Option<u64>) {
+    let mut elapsed = samples.map(|(elapsed, _)| elapsed);
+    elapsed.sort_unstable();
+    let rss = samples
+        .into_iter()
+        .map(|(_, rss)| rss)
+        .collect::<Option<Vec<_>>>()
+        .map(|mut values| {
+            values.sort_unstable();
+            values[REPEAT / 2]
+        });
+    (elapsed[REPEAT / 2], rss)
 }
 
 /// 機能 `sqlcipher` でビルドしたこのプログラムを、同じ件数で実行させて結果を受け取る。
@@ -377,6 +389,47 @@ fn ms(elapsed: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 起動時間とrssの順位が異なってもそれぞれの中央値を返す() {
+        let samples = [(5, 30), (1, 50), (4, 20), (2, 10), (3, 80)]
+            .map(|(elapsed, rss)| (Duration::from_millis(elapsed), Some(rss)));
+
+        assert_eq!(
+            startup_medians(samples),
+            (Duration::from_millis(3), Some(30)),
+            "時間とRSSを独立に集計していない"
+        );
+    }
+
+    #[test]
+    fn rssを測れない場合も起動時間の中央値を返す() {
+        let samples = [5, 1, 4, 2, 3].map(|elapsed| (Duration::from_millis(elapsed), None));
+
+        assert_eq!(
+            startup_medians(samples),
+            (Duration::from_millis(3), None),
+            "RSSを測れない場合の集計が異なる"
+        );
+    }
+
+    #[test]
+    fn rssの計測が一部欠けた場合はrssの中央値を返さない() {
+        for missing in 0..REPEAT {
+            let samples = std::array::from_fn(|i| {
+                (
+                    Duration::from_millis(i as u64 + 1),
+                    (i != missing).then_some(i as u64),
+                )
+            });
+
+            assert_eq!(
+                startup_medians(samples),
+                (Duration::from_millis(3), None),
+                "5回分のRSSが無いのに中央値を返した"
+            );
+        }
+    }
 
     #[test]
     fn 計測の結果は1行にしても同じ値に戻る() {
