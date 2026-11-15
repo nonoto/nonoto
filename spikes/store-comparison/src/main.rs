@@ -3,6 +3,9 @@
 //! 使い方: `cargo run --release -p store-comparison -- [--pages 件数] [--dir ディレクトリ]`
 //! ディレクトリを省略すると一時ディレクトリを使う。
 
+// `unsafe` はライブラリの `fts5` だけに置き、このクレートでは許さない。
+#![deny(unsafe_code)]
+
 mod search;
 mod startup;
 
