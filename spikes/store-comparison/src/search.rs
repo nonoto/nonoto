@@ -1,8 +1,8 @@
 //! 比較用のSQLCipherの検索。方式Bと同じ項目を、同じ順序で返す。
 
 use jiff::Timestamp;
-use nonoto_core::{Error, PageSummary};
-use rusqlite::{Connection, params};
+use nonoto_core::{Error, Page, PageId, PageSummary, PageUpdate};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use store_comparison::tokenizer::Tokenizer;
 
 /// 全文検索のインデックスに使うトークナイザー。
@@ -11,15 +11,11 @@ pub enum FtsIndex {
     /// FTS5の組み込みのtrigram。
     Trigram,
     /// `store_comparison::fts5` で登録するトークナイザー。
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "計測ではまだtrigramだけを計り、テストだけが使う")
-    )]
     Custom(Tokenizer),
 }
 
 impl FtsIndex {
-    fn tokenizer_name(self) -> &'static str {
+    pub fn tokenizer_name(self) -> &'static str {
         match self {
             Self::Trigram => "trigram",
             Self::Custom(tokenizer) => tokenizer.name(),
@@ -140,9 +136,66 @@ fn read_summaries(mut rows: rusqlite::Rows<'_>) -> Result<Vec<PageSummary>, Erro
     Ok(summaries)
 }
 
+/// トークナイザーを登録した接続から、コアのストア (`SqlCipherStore`) と同じSQLでページを保存・更新する。
+///
+/// コアのストアは鍵を渡したあとの接続を外に出さず、自作のトークナイザーを登録できない。
+/// そのため、全文検索のインデックスを保ったままの保存と更新は、変種を問わずこの型で行う。
+pub struct ConnectionStore {
+    conn: Connection,
+}
+
+impl ConnectionStore {
+    pub fn new(conn: Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn insert(&mut self, page: &Page) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO pages (id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                page.id.to_string(),
+                page.title,
+                page.body,
+                page.created_at.as_millisecond(),
+                page.updated_at.as_millisecond(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// コアのストアと同じく、書き込み権を得てから今の値を読み、変える項目だけを差し替えて保存する。
+    pub fn update(&mut self, id: PageId, update: PageUpdate, now: Timestamp) -> Result<(), Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (mut title, mut body): (String, String) = tx
+            .query_row(
+                "SELECT title, body FROM pages WHERE id = ?1",
+                params![id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(Error::PageNotFound(id))?;
+        if let Some(new_title) = update.title {
+            title = new_title;
+        }
+        if let Some(new_body) = update.body {
+            body = new_body;
+        }
+        tx.execute(
+            "UPDATE pages SET title = ?2, body = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id.to_string(), title, body, now.as_millisecond()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use nonoto_core::{Key, Page, PageId, PageStore, SqlCipherStore};
+    use nonoto_core::{Key, PageStore, SqlCipherStore};
     use store_comparison::record::RecordStore;
 
     use super::*;
@@ -168,30 +221,6 @@ mod tests {
         summaries.into_iter().map(|summary| summary.id).collect()
     }
 
-    /// コアのストアは鍵を渡したあとの接続を外に出さず、トークナイザーを登録できないため、
-    /// 全文検索のインデックスを作ったあとは、コアのストアと同じSQLをこの接続で実行して保存する。
-    fn insert(conn: &Connection, page: &Page) {
-        conn.execute(
-            "INSERT INTO pages (id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                page.id.to_string(),
-                page.title,
-                page.body,
-                page.created_at.as_millisecond(),
-                page.updated_at.as_millisecond(),
-            ],
-        )
-        .expect("ページを保存できなかった");
-    }
-
-    fn update_body(conn: &Connection, id: PageId, body: &str, millisecond: i64) {
-        conn.execute(
-            "UPDATE pages SET body = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id.to_string(), body, millisecond],
-        )
-        .expect("ページを更新できなかった");
-    }
-
     #[test]
     fn インデックスを作ったあとの保存と更新を全文検索に反映する() {
         for index in INDEXES {
@@ -207,8 +236,18 @@ mod tests {
             build_fts(&conn, index).expect("全文検索のインデックスを作れなかった");
 
             let added = page("追加したページ", "追加した本文の語句", 2_000);
-            insert(&conn, &added);
-            update_body(&conn, existing.id, "新しい本文の語句", 3_000);
+            let mut store = ConnectionStore::new(crate::open_sqlcipher(&path, &key));
+            store.insert(&added).expect("ページを保存できなかった");
+            store
+                .update(
+                    existing.id,
+                    PageUpdate {
+                        title: None,
+                        body: Some("新しい本文の語句".to_owned()),
+                    },
+                    Timestamp::from_millisecond(3_000).expect("日時を作れなかった"),
+                )
+                .expect("ページを更新できなかった");
 
             conn.execute(
                 "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
