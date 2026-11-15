@@ -9,12 +9,13 @@ Nonotoは、正本を手元の端末に置くローカルファーストなド�
 
 ## 構成
 
-| ディレクトリ              | 内容                                                           |
-| ------------------------- | -------------------------------------------------------------- |
-| `crates/nonoto-core`      | ページの操作・端末上の暗号化ストア・鍵の保管                   |
-| `crates/nonoto-cli`       | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON) |
-| `crates/nonoto-desktop`   | GPUIのデスクトップアプリ                                       |
-| `spikes/store-comparison` | 暗号化ストアの方式を比べるコード                               |
+| ディレクトリ                  | 内容                                                           |
+| ----------------------------- | -------------------------------------------------------------- |
+| `crates/nonoto-core`          | ページの操作・端末上の暗号化ストア・鍵の保管                   |
+| `crates/nonoto-cli`           | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON) |
+| `crates/nonoto-desktop`       | GPUIのデスクトップアプリ                                       |
+| `spikes/store-comparison`     | 暗号化ストアの方式を比べるコード                               |
+| `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)        |
 
 ## 開発コンテナでの開発
 
@@ -26,6 +27,8 @@ make lint                            # clippyで検査する
 make test                            # テストを実行する
 make build-core-windows              # Windows向けにコアをビルドする
 make build-store-comparison-windows  # Windows向けに暗号化ストアの計測のコードをビルドする
+make build-sqlite3mc-windows         # Windows向けにsqlite3mcの比較のコードをビルドする
+make measure-sqlite3mc               # sqlite3mcとSQLCipherを同じ条件で計測する
 make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
 make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
 ```
@@ -54,6 +57,23 @@ cargo run --release --locked -p store-comparison -- --pages 10000
 最後の「必須の条件」の表に、変種ごとに条件を満たしたかを、「計測の値」の表に主な値を示します。
 ページは固定した種の乱数で作るため、実行のたびに同じ内容になります。
 ページを1件ずつ保存するため、開発コンテナでは1万ページで7分ほど、5万ページで30分ほどかかります。
+
+### 暗号化の実装を比べる
+
+`spikes/sqlite3mc-comparison` は、OpenSSLに依存しない暗号化の実装 (SQLite3 Multiple Ciphers。以下sqlite3mc) とSQLCipherを、同じストアのコードで比べます。
+ワークスペースのSQLCipherとsqlite3mcの両方には `rusqlite` をリンクできないため、ワークスペースの外に置いています。
+cargoは、このクレートのディレクトリで実行します (クレートの `.cargo/config.toml` を読ませるため)。
+
+sqlite3mcのソースはリポジトリに置かず、`make fetch-sqlite3mc` がチェックサムを確かめて `target/sqlite3mc/` に取得します。
+`make lint`・`make test`・`make build-sqlite3mc-windows`・`make measure-sqlite3mc` は、取得していなければ先に取得します。
+
+```sh
+make measure-sqlite3mc                     # 1万ページで計測する
+make measure-sqlite3mc MEASURE_PAGES=1000  # 件数を変えて計測する
+```
+
+sqlite3mc版とSQLCipher版 (機能 `sqlcipher`) をビルドし、同じ件数で計って、全件の保存・起動・起動で増えたメモリ・1件の保存と更新・ファイルの大きさを1つの表に並べます。
+SQLCipher版は、OpenSSLを同梱してビルドするため、初めてのビルドに数分かかります。
 
 ## Macで確かめる
 
