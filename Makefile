@@ -1,4 +1,4 @@
-# Windows向けのコアのビルドに使うターゲット。開発コンテナにMinGWを入れている。
+# Windows向けのビルドに使うターゲット。開発コンテナにMinGWを入れている。
 WINDOWS_TARGET := x86_64-pc-windows-gnu
 
 .PHONY: fmt
