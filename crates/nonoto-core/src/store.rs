@@ -17,6 +17,16 @@ pub trait PageStore {
     /// ページを、更新した日時の新しい順に返す。
     fn list(&self) -> Result<Vec<PageSummary>, Error>;
 
+    /// キーワードを空白で区切り、すべての語をタイトルに含むページを、更新した日時の新しい順に `limit` 件まで返す。
+    ///
+    /// 英字の大文字と小文字は区別しない。タイトルが空のページは返さない。
+    fn search_by_title(&self, keyword: &str, limit: usize) -> Result<Vec<PageSummary>, Error>;
+
+    /// タイトルが完全に一致するページを返す。複数あれば、更新した日時の新しいページを返す。無ければ `None` を返す。
+    ///
+    /// 英字の大文字と小文字も区別する。
+    fn find_by_title(&self, title: &str) -> Result<Option<PageSummary>, Error>;
+
     /// ページを返す。無ければ `None` を返す。
     fn get(&self, id: PageId) -> Result<Option<Page>, Error>;
 

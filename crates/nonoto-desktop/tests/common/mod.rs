@@ -37,6 +37,14 @@ impl PageStore for FailingStore {
         self.pages.list()
     }
 
+    fn search_by_title(&self, keyword: &str, limit: usize) -> Result<Vec<PageSummary>, Error> {
+        self.pages.search_by_title(keyword, limit)
+    }
+
+    fn find_by_title(&self, title: &str) -> Result<Option<PageSummary>, Error> {
+        self.pages.find_by_title(title)
+    }
+
     fn get(&self, id: PageId) -> Result<Option<Page>, Error> {
         if self.unreadable == Some(id) {
             return Err(Error::CorruptData("本文を読めない".to_owned()));

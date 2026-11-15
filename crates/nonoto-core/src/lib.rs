@@ -2,6 +2,7 @@
 //!
 //! 各OSのクライアントとサーバーから共有するため、UIとCLIのクレートには依存しない。
 
+mod editing;
 mod error;
 mod key;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -9,9 +10,11 @@ mod keychain;
 mod page;
 mod pages;
 mod store;
+mod wikilink;
 
 use std::path::{Path, PathBuf};
 
+pub use editing::{TextEdit, continue_list, indent, outdent};
 pub use error::Error;
 pub use key::{FileKeyStore, Key, KeyStore};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -19,6 +22,7 @@ pub use keychain::KeychainKeyStore;
 pub use page::{NewPage, Page, PageId, PageSummary, PageUpdate};
 pub use pages::Pages;
 pub use store::{PageStore, SqlCipherStore};
+pub use wikilink::{Wikilink, WikilinkQuery, complete_wikilink, find_wikilinks, wikilink_query};
 
 /// データベースのファイル名。
 const DATABASE_FILE: &str = "nonoto.db";

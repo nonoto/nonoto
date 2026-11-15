@@ -140,6 +140,33 @@ impl PageStore for RecordStore {
         Ok(pages.into_iter().map(summary).collect())
     }
 
+    fn search_by_title(&self, keyword: &str, limit: usize) -> Result<Vec<PageSummary>, Error> {
+        let words: Vec<String> = keyword
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let mut pages: Vec<&Page> = self
+            .pages
+            .values()
+            .filter(|page| {
+                let title = page.title.to_ascii_lowercase();
+                !title.is_empty() && words.iter().all(|word| title.contains(word.as_str()))
+            })
+            .collect();
+        newest_first(&mut pages);
+        Ok(pages.into_iter().take(limit).map(summary).collect())
+    }
+
+    fn find_by_title(&self, title: &str) -> Result<Option<PageSummary>, Error> {
+        let mut pages: Vec<&Page> = self
+            .pages
+            .values()
+            .filter(|page| page.title == title)
+            .collect();
+        newest_first(&mut pages);
+        Ok(pages.into_iter().next().map(summary))
+    }
+
     fn get(&self, id: PageId) -> Result<Option<Page>, Error> {
         Ok(self.pages.get(&id).cloned())
     }

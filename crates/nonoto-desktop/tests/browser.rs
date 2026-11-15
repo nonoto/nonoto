@@ -371,3 +371,118 @@ fn 一覧を読めないときはエラーだけを表示する(cx: &mut TestApp
     })
     .expect("ウィンドウを更新できなかった");
 }
+
+/// 表示している本文の先頭 (最初の行の最初の文字の上) を、左のボタンで押す。
+fn click_body_start(window: WindowHandle<Root>, cx: &mut TestAppContext) {
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let start = window.find("page-body").bounds().origin + point(px(6.), px(8.));
+        window.pointer_down(start, MouseButton::Left, cx);
+        window.pointer_up(start, MouseButton::Left, cx);
+    })
+    .expect("本文を押せなかった");
+    cx.run_until_parked();
+}
+
+fn shown_title(window: WindowHandle<Root>, cx: &mut TestAppContext) -> Option<String> {
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.find("page-title").label().map(str::to_owned)
+    })
+    .expect("ウィンドウを更新できなかった")
+}
+
+#[gpui_kit::test]
+fn 表示のwikiリンクを押すと同じタイトルのページへ移る(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, pages) = pages_with(&[
+        ("はじめに", "古いページ"),
+        ("はじめに", "新しいページ"),
+        ("目次", "[[はじめに]]を読む"),
+    ]);
+    let (window, browser) = open_browser(cx, pages);
+    cx.run_until_parked();
+    assert_eq!(shown_title(window, cx).as_deref(), Some("目次"));
+
+    click_body_start(window, cx);
+    assert_eq!(
+        shown_title(window, cx).as_deref(),
+        Some("はじめに"),
+        "Wikiリンクを押してもリンク先のページへ移らない"
+    );
+    cx.update(|cx| {
+        assert_eq!(
+            browser.read(cx).selected().map(|page| page.body.as_str()),
+            Some("新しいページ"),
+            "同じタイトルのページのうち、新しいページへ移っていない"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn リンク先が無いwikiリンクはリンクにせず_押しても移らない(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, pages) = pages_with(&[("目次", "[[無いページ]]と[[目次]]")]);
+    let (window, browser) = open_browser(cx, pages);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            browser.read(cx).rendered_body(),
+            Some("\\[\\[無いページ\\]\\]と[目次](nonoto-wikilink:0)"),
+            "リンク先が無いWikiリンクをリンクにした"
+        );
+    });
+
+    click_body_start(window, cx);
+    assert_eq!(
+        shown_title(window, cx).as_deref(),
+        Some("目次"),
+        "リンク先が無いWikiリンクを押して、ページが変わった"
+    );
+}
+
+#[gpui_kit::test]
+fn 保存してできたwikiリンクのリンク先を表示に反映する(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, pages) = pages_with(&[("はじめに", ""), ("目次", "")]);
+    let (window, browser) = open_browser(cx, pages);
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("edit", cx);
+        let state = browser.read(cx).body_input().clone();
+        state.update(cx, |state, cx| state.set_value("[[はじめに]]", window, cx));
+        window.click("save", cx);
+    })
+    .expect("ウィンドウを更新できなかった");
+    cx.run_until_parked();
+
+    click_body_start(window, cx);
+    assert_eq!(
+        shown_title(window, cx).as_deref(),
+        Some("はじめに"),
+        "保存した本文のWikiリンクで、リンク先のページへ移らない"
+    );
+}
+
+#[gpui_kit::test]
+fn wikiリンクでないリンクは部品の既定と同じく開く(cx: &mut TestAppContext) {
+    let (_dir, pages) = pages_with(&[("目次", "[外のページ](https://example.com/)")]);
+    let (window, _browser) = open_browser(cx, pages);
+    cx.run_until_parked();
+
+    click_body_start(window, cx);
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://example.com/"),
+        "Wikiリンクでないリンクを開いていない"
+    );
+    assert_eq!(
+        shown_title(window, cx).as_deref(),
+        Some("目次"),
+        "Wikiリンクでないリンクで、ページが変わった"
+    );
+}

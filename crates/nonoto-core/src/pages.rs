@@ -35,6 +35,20 @@ impl<S: PageStore> Pages<S> {
         self.store.list()
     }
 
+    /// キーワードを空白で区切り、すべての語をタイトルに含むページを、更新した日時の新しい順に `limit` 件まで返す。
+    ///
+    /// Wikiリンクの補完の候補に使う。
+    pub fn search_by_title(&self, keyword: &str, limit: usize) -> Result<Vec<PageSummary>, Error> {
+        self.store.search_by_title(keyword, limit)
+    }
+
+    /// タイトルが完全に一致するページを返す。複数あれば、更新した日時の新しいページを返す。
+    ///
+    /// Wikiリンクのリンク先を決めるのに使う。
+    pub fn find_by_title(&self, title: &str) -> Result<Option<PageSummary>, Error> {
+        self.store.find_by_title(title)
+    }
+
     /// ページを取得する。
     pub fn get(&self, id: PageId) -> Result<Page, Error> {
         self.store.get(id)?.ok_or(Error::PageNotFound(id))

@@ -13,7 +13,8 @@ case $lines in
         ;;
 esac
 
-# 見出し・箇条書き・空行・長めの日本語の文を混ぜる。
+# 見出し・箇条書き・空行・長めの日本語の文・Wikiリンクを混ぜる。
+# Wikiリンクを混ぜるのは、入力のたびに本文の全体を解析する処理の重さも確かめるためである。
 awk -v lines="$lines" 'BEGIN {
     for (i = 1; i <= lines; i++) {
         if (i % 100 == 1) {
@@ -22,6 +23,8 @@ awk -v lines="$lines" 'BEGIN {
             print ""
         } else if (i % 7 == 0) {
             printf "- 箇条書きの項目%d\n", i
+        } else if (i % 5 == 0) {
+            printf "%d行目: [[はじめに]] と [[節%d]] へのWikiリンクを含む文。\n", i, int(i / 100) + 1
         } else {
             printf "%d行目: 日本語の文章を書いて、入力とスクロールが引っかからないかを確かめる。\n", i
         }

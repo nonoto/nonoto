@@ -8,6 +8,7 @@ publish.workspace = true
 dirs = "7.0.0"
 getrandom = "0.4.3"
 jiff = "0.2.43"
+pulldown-cmark = { version = "0.13.6", default-features = false }
 rusqlite = { version = "0.42.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 thiserror = "2.0.21"
 uuid = { version = "1.29.2", features = ["v7"] }

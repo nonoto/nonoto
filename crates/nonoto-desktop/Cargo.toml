@@ -9,8 +9,13 @@ name = "nonoto-desktop"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "=0.9.1"
+# 本文の入力で、Markdownの記法を装飾するために、部品のtree-sitterのMarkdownの文法を使う。
+gpui-kit = { version = "=0.9.1", features = ["tree-sitter-markdown"] }
+# 本文の入力のWikiリンクの補完で、部品の補完のトレイトの引数と戻り値の型を書くために使う。
+lsp-types = "0.97.0"
 nonoto-core = { path = "../nonoto-core" }
+# 部品のテーマのスタイルを、テーマのファイルと同じ形の値から作るために使う。
+serde_json = "1.0.154"
 
 [dev-dependencies]
 gpui-kit = { version = "=0.9.1", features = ["test-support"] }

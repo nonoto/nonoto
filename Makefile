@@ -26,9 +26,22 @@ build-core-windows:
 screenshot-desktop:
 	scripts/screenshot-desktop.sh
 
+# 仮想ディスプレイで記法の見本のページの編集の画面を開き、ライトとダークの画面を
+# tmp/screenshot-editor-light.png と tmp/screenshot-editor-dark.png に保存する。
+.PHONY: screenshot-editor
+screenshot-editor:
+	scripts/screenshot-editor.sh
+
 # 数千行のMarkdownのページを1件作る。行数は LINES で変えられる (例: make seed-large-page LINES=10000)。
 LINES ?= 5000
 
 .PHONY: seed-large-page
 seed-large-page:
 	scripts/seed-large-page.sh $(LINES)
+
+# 補完の検索を確かめる短いページをまとめて作る。データの置き場はNONOTO_DATA_DIRで指定する。
+PAGES ?= 10000
+
+.PHONY: seed-pages
+seed-pages:
+	cargo run --quiet --locked -p nonoto-cli --example seed-pages -- --count $(PAGES)
