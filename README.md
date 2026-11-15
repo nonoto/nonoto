@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-14 -->
+<!-- last_synced: 2026-11-15 -->
 
 # Nonoto
 
@@ -21,12 +21,13 @@ Nonotoは、正本を手元の端末に置くローカルファーストなド�
 `Dockerfile.dev` の開発コンテナで、実装と自動の確認を行います。
 
 ```sh
-make fmt                 # 整形する
-make lint                # clippyで検査する
-make test                # テストを実行する
-make build-core-windows  # Windows向けにコアをビルドする
-make screenshot-desktop  # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
-make screenshot-editor   # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
+make fmt                             # 整形する
+make lint                            # clippyで検査する
+make test                            # テストを実行する
+make build-core-windows              # Windows向けにコアをビルドする
+make build-store-comparison-windows  # Windows向けに暗号化ストアの計測のコードをビルドする
+make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
+make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
 ```
 
 データの置き場と鍵の保管場所は、コマンド `nonoto` とデスクトップアプリで共通の環境変数で変えられます。

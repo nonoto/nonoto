@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-14 -->
+<!-- last_synced: 2026-11-15 -->
 
 # Nonoto
 
@@ -25,12 +25,13 @@ The Japanese [README.md](./README.md) is the canonical version, and this file is
 Implementation and automated checks run in the dev container defined by `Dockerfile.dev`.
 
 ```sh
-make fmt                 # Format
-make lint                # Lint with clippy
-make test                # Run the tests
-make build-core-windows  # Build the core for Windows
-make screenshot-desktop  # Start the desktop app on a virtual display and save the screen to tmp/
-make screenshot-editor   # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
+make fmt                             # Format
+make lint                            # Lint with clippy
+make test                            # Run the tests
+make build-core-windows              # Build the core for Windows
+make build-store-comparison-windows  # Build the encrypted store benchmark for Windows
+make screenshot-desktop              # Start the desktop app on a virtual display and save the screen to tmp/
+make screenshot-editor               # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
 ```
 
 The `nonoto` command and the desktop app share environment variables for the data location and the key storage.

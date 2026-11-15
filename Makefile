@@ -21,6 +21,11 @@ test:
 build-core-windows:
 	cargo build -p nonoto-core --target $(WINDOWS_TARGET) --locked
 
+# 全文検索のトークナイザーを登録する計測のコードを、Windows向けにビルドする。
+.PHONY: build-store-comparison-windows
+build-store-comparison-windows:
+	cargo build -p store-comparison --target $(WINDOWS_TARGET) --locked
+
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop
 screenshot-desktop:
