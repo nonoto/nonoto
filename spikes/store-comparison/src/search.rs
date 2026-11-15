@@ -65,8 +65,11 @@ pub fn scan(conn: &Connection, query: &str) -> Result<Vec<PageSummary>, Error> {
 ///
 /// trigramでは、FTS5で候補を絞ってから部分一致を確かめ、3文字未満は全件を走査する。
 /// 自作のトークナイザーでは、クエリをフレーズとして渡し、FTS5の結果だけを返す。
-/// フレーズにできない空のクエリは、全件を走査する。
+/// フレーズにできない空のクエリと、FTS5が終端として扱うNULを含むクエリは、全件を走査する。
 pub fn fts(conn: &Connection, index: FtsIndex, query: &str) -> Result<Vec<PageSummary>, Error> {
+    if query.is_empty() || query.contains('\0') {
+        return scan(conn, query);
+    }
     let length = query.chars().count();
     let phrase = format!("\"{}\"", query.replace('"', "\"\""));
     match index {
@@ -80,7 +83,6 @@ pub fn fts(conn: &Connection, index: FtsIndex, query: &str) -> Result<Vec<PageSu
             query,
             &phrase,
         ),
-        FtsIndex::Custom(_) if length == 0 => scan(conn, query),
         FtsIndex::Custom(tokenizer) => {
             // バイグラムの1文字のクエリは、その文字で始まるトークンの前方一致で引く。
             let expression = if tokenizer == Tokenizer::Bigram && length == 1 {
@@ -256,6 +258,10 @@ mod tests {
             ("スケジュール", "Hello World\nの共有、会", 4_000),
             ("該当しないページ", "大阪", 3_000),
             ("会", "", 5_000),
+            ("NULを含む本文", "a\0b", 6_000),
+            ("a\0b", "タイトルにNUL", 7_000),
+            ("単独のNUL", "\0", 8_000),
+            ("NULを含まない比較用", "ab", 9_000),
         ] {
             let page = page(title, body, millis);
             for store in &mut stores {
@@ -298,6 +304,11 @@ mod tests {
             "、会",
             "無い語句",
             "無",
+            "\0",
+            "a\0",
+            "\0b",
+            "a\0b",
+            "a\0c",
         ] {
             let mut found: Vec<_> = pages
                 .iter()
