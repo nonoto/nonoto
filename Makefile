@@ -1,21 +1,33 @@
 # Windows向けのビルドに使うターゲット。開発コンテナにMinGWを入れている。
 WINDOWS_TARGET := x86_64-pc-windows-gnu
 
+# ワークスペースの外に置く、sqlite3mcにリンクするクレート。設定 (.cargo/config.toml) を読ませるため、このディレクトリでcargoを実行する。
+SQLITE3MC_CRATE := spikes/sqlite3mc-comparison
+
 .PHONY: fmt
 fmt:
 	cargo fmt --all
+	cargo fmt --manifest-path $(SQLITE3MC_CRATE)/Cargo.toml
 
 .PHONY: fmt-check
 fmt-check:
 	cargo fmt --all --check
+	cargo fmt --manifest-path $(SQLITE3MC_CRATE)/Cargo.toml --check
 
 .PHONY: lint
-lint:
+lint: fetch-sqlite3mc
 	cargo clippy --workspace --all-targets --locked -- -D warnings
+	cd $(SQLITE3MC_CRATE) && cargo clippy --all-targets --locked -- -D warnings
 
 .PHONY: test
-test:
+test: fetch-sqlite3mc
 	cargo test --workspace --locked
+	cd $(SQLITE3MC_CRATE) && cargo test --locked
+
+# sqlite3mcのソースを取得する。取得済みなら何もしない。
+.PHONY: fetch-sqlite3mc
+fetch-sqlite3mc:
+	scripts/fetch-sqlite3mc.sh
 
 .PHONY: build-core-windows
 build-core-windows:
@@ -25,6 +37,22 @@ build-core-windows:
 .PHONY: build-store-comparison-windows
 build-store-comparison-windows:
 	cargo build -p store-comparison --target $(WINDOWS_TARGET) --locked
+
+# sqlite3mcにリンクする比較のコードを、Windows向けにビルドする。
+.PHONY: build-sqlite3mc-windows
+build-sqlite3mc-windows: fetch-sqlite3mc
+	cd $(SQLITE3MC_CRATE) && cargo build --target $(WINDOWS_TARGET) --locked
+
+# sqlite3mcとSQLCipherで、ページの保存・起動・メモリ・1件の保存と更新を同じ条件で計り、表に並べる。
+# 件数は MEASURE_PAGES で変えられる。SQLCipher版は、sqlite3mc版と成果物を分けてビルドする。
+MEASURE_PAGES ?= 10000
+
+.PHONY: measure-sqlite3mc
+measure-sqlite3mc: fetch-sqlite3mc
+	cd $(SQLITE3MC_CRATE) && cargo build --release --locked
+	cd $(SQLITE3MC_CRATE) && cargo build --release --locked --features sqlcipher --target-dir ../../target/sqlite3mc-comparison-sqlcipher
+	target/sqlite3mc-comparison/release/sqlite3mc-comparison --pages $(MEASURE_PAGES) \
+		--baseline target/sqlite3mc-comparison-sqlcipher/release/sqlite3mc-comparison
 
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop
