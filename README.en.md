@@ -41,6 +41,24 @@ The `nonoto` command and the desktop app share environment variables for the dat
 | `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
 | `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
 
+## Benchmarking the encrypted store
+
+This compares the encrypted store approaches and the full-text index variants of approach A (substring scan, trigram, bigram, and unigram) on the same pages.
+
+```sh
+cargo run --release --locked -p store-comparison -- --pages 10000
+```
+
+| Argument  | Meaning                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------- |
+| `--pages` | Number of pages. Defaults to 10000                                                        |
+| `--dir`   | Directory for the databases. Defaults to a temporary directory that is removed at the end |
+
+The results are written to standard output as Markdown.
+The final "必須の条件" (required conditions) table shows whether each variant meets each condition, and the "計測の値" (measurements) table shows the main values.
+The pages are generated from a fixed random seed, so every run uses the same content.
+Pages are saved one at a time, so a run takes about 7 minutes for 10,000 pages and about 30 minutes for 50,000 pages in the dev container.
+
 ## Checking on a Mac
 
 Things that can only be checked on a Mac, such as Japanese input (IME), VoiceOver, and the keychain, are checked on a local Mac.
