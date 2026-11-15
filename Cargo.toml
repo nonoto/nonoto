@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "spikes/*"]
+# sqlite3mcにリンクするため、ワークスペースのSQLCipherと分ける (クレートの Cargo.toml を参照)。
+exclude = ["spikes/sqlite3mc-comparison"]
 
 [workspace.package]
 version = "0.1.0"
