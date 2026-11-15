@@ -1,15 +1,36 @@
 //! 比較用のSQLCipherの検索。方式Bと同じ項目を、同じ順序で返す。
 
 use jiff::Timestamp;
-use nonoto_core::{Error, PageSummary};
-use rusqlite::{Connection, params};
+use nonoto_core::{Error, Page, PageId, PageSummary, PageUpdate};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use store_comparison::tokenizer::Tokenizer;
+
+/// 全文検索のインデックスに使うトークナイザー。
+#[derive(Clone, Copy, Debug)]
+pub enum FtsIndex {
+    /// FTS5の組み込みのtrigram。
+    Trigram,
+    /// `store_comparison::fts5` で登録するトークナイザー。
+    Custom(Tokenizer),
+}
+
+impl FtsIndex {
+    pub fn tokenizer_name(self) -> &'static str {
+        match self {
+            Self::Trigram => "trigram",
+            Self::Custom(tokenizer) => tokenizer.name(),
+        }
+    }
+}
 
 /// 全文検索のインデックスを作り、ページの保存と更新をインデックスに反映するトリガーを付ける。
 ///
 /// コアのページの操作は作成と更新だけなので、挿入と更新のトリガーを付ける。
-pub fn build_fts(conn: &Connection) -> Result<(), Error> {
-    conn.execute_batch(
-        "CREATE VIRTUAL TABLE pages_fts USING fts5(title, body, content='pages', tokenize='trigram');
+/// [`FtsIndex::Custom`] では、このあとにページを保存する接続にもトークナイザーを登録しておく
+/// (`store_comparison::fts5::register`)。トークナイザーを登録していない接続からは保存できなくなる。
+pub fn build_fts(conn: &Connection, index: FtsIndex) -> Result<(), Error> {
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE pages_fts USING fts5(title, body, content='pages', tokenize='{}');
          INSERT INTO pages_fts(pages_fts) VALUES ('rebuild');
          CREATE TRIGGER pages_fts_insert AFTER INSERT ON pages BEGIN
              INSERT INTO pages_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
@@ -19,7 +40,8 @@ pub fn build_fts(conn: &Connection) -> Result<(), Error> {
                  VALUES ('delete', old.rowid, old.title, old.body);
              INSERT INTO pages_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
          END;",
-    )?;
+        index.tokenizer_name()
+    ))?;
     Ok(())
 }
 
@@ -35,21 +57,46 @@ pub fn scan(conn: &Connection, query: &str) -> Result<Vec<PageSummary>, Error> {
     )
 }
 
-/// FTS5で候補を絞ってから部分一致を確かめる。3文字未満は全件を走査する。
-pub fn fts(conn: &Connection, query: &str) -> Result<Vec<PageSummary>, Error> {
-    if query.chars().count() < 3 {
+/// FTS5のインデックスで検索する。結果は [`scan`] と同じになる。
+///
+/// trigramでは、FTS5で候補を絞ってから部分一致を確かめ、3文字未満は全件を走査する。
+/// 自作のトークナイザーでは、クエリをフレーズとして渡し、FTS5の結果だけを返す。
+/// フレーズにできない空のクエリと、FTS5が終端として扱うNULを含むクエリは、全件を走査する。
+pub fn fts(conn: &Connection, index: FtsIndex, query: &str) -> Result<Vec<PageSummary>, Error> {
+    if query.is_empty() || query.contains('\0') {
         return scan(conn, query);
     }
-    let quoted = format!("\"{}\"", query.replace('"', "\"\""));
-    search(
-        conn,
-        "SELECT p.id, p.title, p.created_at, p.updated_at FROM pages AS p
-         JOIN pages_fts ON pages_fts.rowid = p.rowid
-         WHERE pages_fts MATCH ?2 AND (instr(p.title, ?1) > 0 OR instr(p.body, ?1) > 0)
-         ORDER BY p.updated_at DESC, p.id DESC",
-        query,
-        &quoted,
-    )
+    let length = query.chars().count();
+    let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+    match index {
+        FtsIndex::Trigram if length < 3 => scan(conn, query),
+        FtsIndex::Trigram => search(
+            conn,
+            "SELECT p.id, p.title, p.created_at, p.updated_at FROM pages AS p
+             JOIN pages_fts ON pages_fts.rowid = p.rowid
+             WHERE pages_fts MATCH ?2 AND (instr(p.title, ?1) > 0 OR instr(p.body, ?1) > 0)
+             ORDER BY p.updated_at DESC, p.id DESC",
+            query,
+            &phrase,
+        ),
+        FtsIndex::Custom(tokenizer) => {
+            // バイグラムの1文字のクエリは、その文字で始まるトークンの前方一致で引く。
+            let expression = if tokenizer == Tokenizer::Bigram && length == 1 {
+                format!("{phrase} *")
+            } else {
+                phrase
+            };
+            search(
+                conn,
+                "SELECT p.id, p.title, p.created_at, p.updated_at FROM pages AS p
+                 JOIN pages_fts ON pages_fts.rowid = p.rowid
+                 WHERE pages_fts MATCH ?2
+                 ORDER BY p.updated_at DESC, p.id DESC",
+                query,
+                &expression,
+            )
+        }
+    }
 }
 
 fn search(
@@ -89,12 +136,75 @@ fn read_summaries(mut rows: rusqlite::Rows<'_>) -> Result<Vec<PageSummary>, Erro
     Ok(summaries)
 }
 
+/// トークナイザーを登録した接続から、コアのストア (`SqlCipherStore`) と同じSQLでページを保存・更新する。
+///
+/// コアのストアは鍵を渡したあとの接続を外に出さず、自作のトークナイザーを登録できない。
+/// そのため、全文検索のインデックスを保ったままの保存と更新は、変種を問わずこの型で行う。
+pub struct ConnectionStore {
+    conn: Connection,
+}
+
+impl ConnectionStore {
+    pub fn new(conn: Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn insert(&mut self, page: &Page) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO pages (id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                page.id.to_string(),
+                page.title,
+                page.body,
+                page.created_at.as_millisecond(),
+                page.updated_at.as_millisecond(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// コアのストアと同じく、書き込み権を得てから今の値を読み、変える項目だけを差し替えて保存する。
+    pub fn update(&mut self, id: PageId, update: PageUpdate, now: Timestamp) -> Result<(), Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (mut title, mut body): (String, String) = tx
+            .query_row(
+                "SELECT title, body FROM pages WHERE id = ?1",
+                params![id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(Error::PageNotFound(id))?;
+        if let Some(new_title) = update.title {
+            title = new_title;
+        }
+        if let Some(new_body) = update.body {
+            body = new_body;
+        }
+        tx.execute(
+            "UPDATE pages SET title = ?2, body = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id.to_string(), title, body, now.as_millisecond()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use nonoto_core::{Key, Page, PageId, PageStore, PageUpdate, SqlCipherStore};
+    use nonoto_core::{Key, PageStore, SqlCipherStore};
     use store_comparison::record::RecordStore;
 
     use super::*;
+
+    const INDEXES: [FtsIndex; 3] = [
+        FtsIndex::Trigram,
+        FtsIndex::Custom(Tokenizer::Bigram),
+        FtsIndex::Custom(Tokenizer::Unigram),
+    ];
 
     fn page(title: &str, body: &str, millisecond: i64) -> Page {
         let at = Timestamp::from_millisecond(millisecond).expect("日時を作れなかった");
@@ -113,96 +223,131 @@ mod tests {
 
     #[test]
     fn インデックスを作ったあとの保存と更新を全文検索に反映する() {
-        let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
-        let key = Key::generate().expect("鍵を作れなかった");
-        let path = dir.path().join("a.db");
-        let existing = page("既存のページ", "古い本文の語句", 1_000);
-        SqlCipherStore::open(&path, &key)
-            .expect("方式Aを開けなかった")
-            .insert(&existing)
-            .expect("方式Aに保存できなかった");
-        let conn = crate::open_sqlcipher(&path, &key);
-        build_fts(&conn).expect("全文検索のインデックスを作れなかった");
+        for index in INDEXES {
+            let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
+            let key = Key::generate().expect("鍵を作れなかった");
+            let path = dir.path().join("a.db");
+            let existing = page("既存のページ", "古い本文の語句", 1_000);
+            SqlCipherStore::open(&path, &key)
+                .expect("方式Aを開けなかった")
+                .insert(&existing)
+                .expect("方式Aに保存できなかった");
+            let conn = crate::open_sqlcipher(&path, &key);
+            build_fts(&conn, index).expect("全文検索のインデックスを作れなかった");
 
-        let mut store = SqlCipherStore::open(&path, &key).expect("方式Aを開き直せなかった");
-        let added = page("追加したページ", "追加した本文の語句", 2_000);
-        store.insert(&added).expect("方式Aに保存できなかった");
-        store
-            .update(
-                existing.id,
-                PageUpdate {
-                    title: None,
-                    body: Some("新しい本文の語句".to_owned()),
-                },
-                Timestamp::from_millisecond(3_000).expect("日時を作れなかった"),
+            let added = page("追加したページ", "追加した本文の語句", 2_000);
+            let mut store = ConnectionStore::new(crate::open_sqlcipher(&path, &key));
+            store.insert(&added).expect("ページを保存できなかった");
+            store
+                .update(
+                    existing.id,
+                    PageUpdate {
+                        title: None,
+                        body: Some("新しい本文の語句".to_owned()),
+                    },
+                    Timestamp::from_millisecond(3_000).expect("日時を作れなかった"),
+                )
+                .expect("ページを更新できなかった");
+
+            conn.execute(
+                "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
+                [],
             )
-            .expect("方式Aを更新できなかった");
-
-        conn.execute(
-            "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
-            [],
-        )
-        .expect("全文検索のインデックスがページの内容と食い違う");
-        assert_eq!(
-            ids(fts(&conn, "追加した本文").expect("全文検索できなかった")),
-            [added.id],
-            "保存したページを全文検索で見つけられない"
-        );
-        assert_eq!(
-            ids(fts(&conn, "新しい本文").expect("全文検索できなかった")),
-            [existing.id],
-            "更新した本文を全文検索で見つけられない"
-        );
-        assert!(
-            fts(&conn, "古い本文")
-                .expect("全文検索できなかった")
-                .is_empty(),
-            "更新する前の本文で見つかった"
-        );
+            .unwrap_or_else(|error| {
+                panic!("全文検索のインデックスがページの内容と食い違う: {index:?} {error}")
+            });
+            assert_eq!(
+                ids(fts(&conn, index, "追加した本文").expect("全文検索できなかった")),
+                [added.id],
+                "保存したページを全文検索で見つけられない: {index:?}"
+            );
+            assert_eq!(
+                ids(fts(&conn, index, "新しい本文").expect("全文検索できなかった")),
+                [existing.id],
+                "更新した本文を全文検索で見つけられない: {index:?}"
+            );
+            assert!(
+                fts(&conn, index, "古い本文")
+                    .expect("全文検索できなかった")
+                    .is_empty(),
+                "更新する前の本文で見つかった: {index:?}"
+            );
+        }
     }
 
     #[test]
     fn 各方式の検索結果の項目と順序が一致する() {
         let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
         let key = Key::generate().expect("鍵を作れなかった");
-        let path = dir.path().join("a.db");
-        let mut a = SqlCipherStore::open(&path, &key).expect("方式Aを開けなかった");
+        let paths: Vec<_> = INDEXES
+            .iter()
+            .enumerate()
+            .map(|(i, _)| dir.path().join(format!("a{i}.db")))
+            .collect();
+        let mut stores: Vec<_> = paths
+            .iter()
+            .map(|path| SqlCipherStore::open(path, &key).expect("方式Aを開けなかった"))
+            .collect();
         let mut b = RecordStore::open(&dir.path().join("b.db"), &key).expect("方式Bを開けなかった");
         let mut pages = Vec::new();
         for (title, body, millis) in [
             ("会議の議事録", "東京都の議事録の確認", 1_000),
             ("東京都の会議", "本文にABCと100%と_と\"引用\"", 2_000),
             ("別のページ", "会議とabc", 2_000),
+            ("スケジュール", "Hello World\nの共有、会", 4_000),
             ("該当しないページ", "大阪", 3_000),
+            ("会", "", 5_000),
+            ("NULを含む本文", "a\0b", 6_000),
+            ("a\0b", "タイトルにNUL", 7_000),
+            ("単独のNUL", "\0", 8_000),
+            ("NULを含まない比較用", "ab", 9_000),
         ] {
-            let at = Timestamp::from_millisecond(millis).expect("日時を作れなかった");
-            let page = Page {
-                id: PageId::new(),
-                title: title.to_owned(),
-                body: body.to_owned(),
-                created_at: at,
-                updated_at: at,
-            };
-            a.insert(&page).expect("方式Aに保存できなかった");
+            let page = page(title, body, millis);
+            for store in &mut stores {
+                store.insert(&page).expect("方式Aに保存できなかった");
+            }
             b.insert(&page).expect("方式Bに保存できなかった");
             pages.push(page);
         }
-        drop(a);
-        let conn = crate::open_sqlcipher(&path, &key);
-        build_fts(&conn).expect("全文検索のインデックスを作れなかった");
+        drop(stores);
+        let conns: Vec<_> = INDEXES
+            .iter()
+            .zip(&paths)
+            .map(|(index, path)| {
+                let conn = crate::open_sqlcipher(path, &key);
+                build_fts(&conn, *index).expect("全文検索のインデックスを作れなかった");
+                conn
+            })
+            .collect();
 
         for query in [
             "",
             "会",
+            "録",
+            "大",
             "会議",
+            "阪",
             "東京都",
             "議事録の確認",
+            "ケジュ",
+            "スケジュール",
+            "ell",
+            "o W",
+            "d\nの",
+            " ",
             "ABC",
             "abc",
             "%",
             "_",
             "\"引用\"",
+            "、会",
             "無い語句",
+            "無",
+            "\0",
+            "a\0",
+            "\0b",
+            "a\0b",
+            "a\0c",
         ] {
             let mut found: Vec<_> = pages
                 .iter()
@@ -219,20 +364,22 @@ mod tests {
                 })
                 .collect();
 
-            assert_eq!(
-                scan(&conn, query).expect("走査で検索できなかった"),
-                expected,
-                "方式Aの走査の結果が異なる: {query}"
-            );
-            assert_eq!(
-                fts(&conn, query).expect("全文検索できなかった"),
-                expected,
-                "方式Aの全文検索の結果が異なる: {query}"
-            );
+            for (index, conn) in INDEXES.iter().zip(&conns) {
+                assert_eq!(
+                    scan(conn, query).expect("走査で検索できなかった"),
+                    expected,
+                    "方式Aの走査の結果が異なる: {query:?}"
+                );
+                assert_eq!(
+                    fts(conn, *index, query).expect("全文検索できなかった"),
+                    expected,
+                    "方式Aの全文検索の結果が異なる: {index:?} {query:?}"
+                );
+            }
             assert_eq!(
                 b.search(query),
                 expected,
-                "方式Bの検索の結果が異なる: {query}"
+                "方式Bの検索の結果が異なる: {query:?}"
             );
         }
     }

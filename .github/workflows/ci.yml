@@ -38,7 +38,7 @@ jobs:
       - run: make test
 
   build-core:
-    name: コアのビルド (${{ matrix.name }})
+    name: コアと計測のコードのビルド (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -80,3 +80,14 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build -p nonoto-core --target ${{ matrix.target }} --locked
+      # 全文検索のトークナイザーをCのAPIで登録するコードも、各OS向けにビルドできることを確かめる。
+      - run: cargo build -p store-comparison --target ${{ matrix.target }} --locked
+      # OpenSSLに依存しない暗号化の実装 (sqlite3mc) も、各OS向けにビルドできることを確かめる。
+      # 設定 (.cargo/config.toml) を読ませるため、クレートのディレクトリでビルドする。
+      - name: sqlite3mcのソースを取得する
+        shell: bash
+        run: scripts/fetch-sqlite3mc.sh
+      - name: sqlite3mcにリンクする比較のコードをビルドする
+        shell: bash
+        working-directory: spikes/sqlite3mc-comparison
+        run: cargo build --target ${{ matrix.target }} --locked

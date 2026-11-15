@@ -6,10 +6,10 @@ use jiff::Timestamp;
 use nonoto_core::{Key, Page, PageId, PageStore, SqlCipherStore};
 use store_comparison::record::RecordStore;
 
-fn run_worker(scheme: &str, dir: &Path, key: &Key) -> Output {
+fn run_worker(scheme: &str, path: &Path, key: &Key) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_store-comparison"))
-        .args(["--measure-open", scheme, "--dir"])
-        .arg(dir)
+        .args(["--measure-open", scheme, "--path"])
+        .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -50,7 +50,7 @@ fn 計測用のプロセスは既存データを変更せず初回オープン�
         let path = dir.path().join(format!("{scheme}.db"));
         let before = std::fs::read(&path).expect("データベースを読めなかった");
 
-        let output = run_worker(scheme, dir.path(), &key);
+        let output = run_worker(scheme, &path, &key);
 
         assert!(
             output.status.success(),
@@ -82,7 +82,7 @@ fn 計測用のプロセスはデータベースを新しく作らない() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
     let key = Key::generate().expect("鍵を作れなかった");
     for scheme in ["a", "b"] {
-        let output = run_worker(scheme, dir.path(), &key);
+        let output = run_worker(scheme, &dir.path().join(format!("{scheme}.db")), &key);
         assert!(
             !output.status.success(),
             "データベースが無いのに計測に成功した"

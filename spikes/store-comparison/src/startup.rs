@@ -38,8 +38,7 @@ pub struct Measurement {
 }
 
 /// 既存のデータベースを初めて開く。鍵は親から標準入力のパイプで受け取る。
-pub fn run_worker(scheme: Scheme, dir: &Path) {
-    let path = dir.join(format!("{}.db", scheme.name()));
+pub fn run_worker(scheme: Scheme, path: &Path) {
     let mut bytes = Zeroizing::new([0u8; 32]);
     std::io::stdin()
         .read_exact(bytes.as_mut())
@@ -47,8 +46,8 @@ pub fn run_worker(scheme: Scheme, dir: &Path) {
     let key = Key::from_bytes(bytes.as_ref()).expect("計測用の鍵の長さが違う");
     assert!(path.is_file(), "計測するデータベースが無い");
     let measured = match scheme {
-        Scheme::A => measure(|| SqlCipherStore::open(&path, &key).expect("方式Aを開けなかった")),
-        Scheme::B => measure(|| RecordStore::open(&path, &key).expect("方式Bを開けなかった")),
+        Scheme::A => measure(|| SqlCipherStore::open(path, &key).expect("方式Aを開けなかった")),
+        Scheme::B => measure(|| RecordStore::open(path, &key).expect("方式Bを開けなかった")),
     };
     let rss = measured
         .rss_increase_kib
@@ -71,11 +70,11 @@ fn measure<T>(open: impl FnOnce() -> T) -> Measurement {
     }
 }
 
-pub fn in_new_process(scheme: Scheme, dir: &Path, key: &Key) -> Measurement {
+pub fn in_new_process(scheme: Scheme, path: &Path, key: &Key) -> Measurement {
     let mut child =
         Command::new(std::env::current_exe().expect("実行ファイルの場所を取得できなかった"))
-            .args(["--measure-open", scheme.name(), "--dir"])
-            .arg(dir)
+            .args(["--measure-open", scheme.name(), "--path"])
+            .arg(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

@@ -1,0 +1,13 @@
+# このクレートのディレクトリでcargoを実行したときだけ読まれる。`make` のターゲットはこのディレクトリで実行する。
+
+[build]
+# ビルドの成果物を、gitで無視しているリポジトリのルートの target/ に置く。
+target-dir = "../../target/sqlite3mc-comparison"
+
+[env]
+# scripts/fetch-sqlite3mc.sh がsqlite3mcのソースを展開する場所。build.rs が読む。
+SQLITE3MC_SOURCE_DIR = { value = "../../target/sqlite3mc/2.7.0", relative = true }
+# libsqlite3-sys には、端末に入っているSQLiteを探させず、リンクのときに `-lsqlite3` だけを渡させる。
+# 実体は build.rs がビルドする libsqlite3 で、build.rs が出力のディレクトリを検索のパスに足す。
+SQLITE3_LIB_DIR = { value = ".", relative = true }
+SQLITE3_NO_PKG_CONFIG = "1"

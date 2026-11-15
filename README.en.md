@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-14 -->
+<!-- last_synced: 2026-11-15 -->
 
 # Nonoto
 
@@ -13,24 +13,28 @@ The Japanese [README.md](./README.md) is the canonical version, and this file is
 
 ## Layout
 
-| Directory                 | Contents                                                                 |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `crates/nonoto-core`      | Page operations, the encrypted on-device store, and key storage          |
-| `crates/nonoto-cli`       | The `nonoto` command (create, list, get, and update pages; outputs JSON) |
-| `crates/nonoto-desktop`   | The GPUI desktop app                                                     |
-| `spikes/store-comparison` | Code comparing approaches to the encrypted store                         |
+| Directory                     | Contents                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `crates/nonoto-core`          | Page operations, the encrypted on-device store, and key storage          |
+| `crates/nonoto-cli`           | The `nonoto` command (create, list, get, and update pages; outputs JSON) |
+| `crates/nonoto-desktop`       | The GPUI desktop app                                                     |
+| `spikes/store-comparison`     | Code comparing approaches to the encrypted store                         |
+| `spikes/sqlite3mc-comparison` | Code comparing SQLCipher and sqlite3mc (outside the workspace)           |
 
 ## Developing in the dev container
 
 Implementation and automated checks run in the dev container defined by `Dockerfile.dev`.
 
 ```sh
-make fmt                 # Format
-make lint                # Lint with clippy
-make test                # Run the tests
-make build-core-windows  # Build the core for Windows
-make screenshot-desktop  # Start the desktop app on a virtual display and save the screen to tmp/
-make screenshot-editor   # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
+make fmt                             # Format
+make lint                            # Lint with clippy
+make test                            # Run the tests
+make build-core-windows              # Build the core for Windows
+make build-store-comparison-windows  # Build the encrypted store benchmark for Windows
+make build-sqlite3mc-windows         # Build the sqlite3mc comparison for Windows
+make measure-sqlite3mc               # Benchmark sqlite3mc and SQLCipher under the same conditions
+make screenshot-desktop              # Start the desktop app on a virtual display and save the screen to tmp/
+make screenshot-editor               # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
 ```
 
 The `nonoto` command and the desktop app share environment variables for the data location and the key storage.
@@ -39,6 +43,41 @@ The `nonoto` command and the desktop app share environment variables for the dat
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
 | `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
+
+## Benchmarking the encrypted store
+
+This compares the encrypted store approaches and the full-text index variants of approach A (substring scan, trigram, bigram, and unigram) on the same pages.
+
+```sh
+cargo run --release --locked -p store-comparison -- --pages 10000
+```
+
+| Argument  | Meaning                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------- |
+| `--pages` | Number of pages. Defaults to 10000                                                        |
+| `--dir`   | Directory for the databases. Defaults to a temporary directory that is removed at the end |
+
+The results are written to standard output as Markdown.
+The final "必須の条件" (required conditions) table shows whether each variant meets each condition, and the "計測の値" (measurements) table shows the main values.
+The pages are generated from a fixed random seed, so every run uses the same content.
+Pages are saved one at a time, so a run takes about 7 minutes for 10,000 pages and about 30 minutes for 50,000 pages in the dev container.
+
+### Comparing encryption implementations
+
+`spikes/sqlite3mc-comparison` compares an encryption implementation that does not depend on OpenSSL (SQLite3 Multiple Ciphers, sqlite3mc below) with SQLCipher, using the same store code.
+It lives outside the workspace, because `rusqlite` cannot link to both the workspace's SQLCipher and sqlite3mc.
+Run cargo in the crate's directory, so that the crate's `.cargo/config.toml` is read.
+
+The sqlite3mc source is not kept in the repository; `make fetch-sqlite3mc` downloads it to `target/sqlite3mc/` after verifying its checksum.
+`make lint`, `make test`, `make build-sqlite3mc-windows`, and `make measure-sqlite3mc` download it first if needed.
+
+```sh
+make measure-sqlite3mc                     # Benchmark with 10,000 pages
+make measure-sqlite3mc MEASURE_PAGES=1000  # Benchmark with a different number of pages
+```
+
+This builds the sqlite3mc version and the SQLCipher version (the `sqlcipher` feature), measures both with the same number of pages, and shows saving all pages, startup, memory added at startup, saving and updating one page, and the file size in one table.
+The SQLCipher version builds a bundled OpenSSL, so its first build takes several minutes.
 
 ## Checking on a Mac
 

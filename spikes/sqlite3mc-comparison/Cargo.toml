@@ -1,0 +1,29 @@
+# ワークスペースの外に置くクレート。ワークスペースのクレートが使うSQLCipherと、sqlite3mcの両方には
+# `rusqlite` をリンクできない (ネイティブのライブラリ `sqlite3` にリンクするパッケージは1つしか置けない) ため。
+[package]
+name = "sqlite3mc-comparison"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# このクレートだけでワークスペースにする。
+[workspace]
+
+[features]
+# sqlite3mcの代わりに、ワークスペースと同じSQLCipherにリンクする。同じ計測のコードで比べるため。
+sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+
+[dependencies]
+getrandom = "0.4.3"
+rusqlite = "0.42.0"
+zeroize = "1.9.1"
+
+[build-dependencies]
+cc = "1.11.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+# ワークスペースの `[workspace.lints]` を引き継げないため、同じ設定を書く。
+[lints.clippy]
+all = { level = "deny", priority = -1 }
