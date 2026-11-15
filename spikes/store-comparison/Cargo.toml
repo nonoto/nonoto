@@ -8,7 +8,8 @@ publish.workspace = true
 chacha20poly1305 = "0.11.0"
 jiff = "0.2.43"
 nonoto-core = { path = "../../crates/nonoto-core" }
-rusqlite = "0.42.0"
+# FTS5のトークナイザーを登録するときに、`fts5_api` のポインタの置き場をSQLに渡すため。
+rusqlite = { version = "0.42.0", features = ["pointer"] }
 zeroize = "1.9.1"
 
 [dev-dependencies]
