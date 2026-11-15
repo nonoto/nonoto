@@ -113,8 +113,10 @@ fn measure_a(path: &Path, key: &Key, pages: &[Page]) {
     }
 
     let size_before = database_size(path);
-    let build =
-        time(|| search::build_fts(&conn).expect("方式Aに全文検索のインデックスを作れなかった"));
+    let build = time(|| {
+        search::build_fts(&conn, search::FtsIndex::Trigram)
+            .expect("方式Aに全文検索のインデックスを作れなかった")
+    });
     report("全文検索のインデックスの作成 (FTS5 trigram)", build);
     println!(
         "- 全文検索のインデックスで増えたファイルの大きさ: {} KiB",
@@ -122,7 +124,10 @@ fn measure_a(path: &Path, key: &Key, pages: &[Page]) {
     );
     for query in QUERIES.iter().filter(|query| query.chars().count() >= 3) {
         let (found, elapsed) = median_with(|| {
-            timed(|| search::fts(&conn, query).expect("方式Aを全文検索できなかった"))
+            timed(|| {
+                search::fts(&conn, search::FtsIndex::Trigram, query)
+                    .expect("方式Aを全文検索できなかった")
+            })
         });
         report(
             &format!("検索 FTS5「{query}」 ({}件)", found.len()),
@@ -235,6 +240,7 @@ fn measure_updates(store: &mut impl PageStore, pages: &[Page]) -> OperationMeasu
     OperationMeasurement { elapsed, count }
 }
 
+/// 方式Aのデータベースを開いて鍵を渡し、全文検索のトークナイザーを登録する。
 fn open_sqlcipher(path: &Path, key: &Key) -> Connection {
     let conn = Connection::open(path).expect("方式Aのデータベースを開けなかった");
     let hex = Zeroizing::new(
@@ -246,6 +252,7 @@ fn open_sqlcipher(path: &Path, key: &Key) -> Connection {
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", hex.as_str()));
     conn.execute_batch(&statement)
         .expect("方式Aのデータベースに鍵を渡せなかった");
+    store_comparison::fts5::register(&conn).expect("全文検索のトークナイザーを登録できなかった");
     conn
 }
 
