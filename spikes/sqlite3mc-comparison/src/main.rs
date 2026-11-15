@@ -77,6 +77,7 @@ impl Args {
                 _ => panic!("知らない引数: {arg}"),
             }
         }
+        assert!(args.pages > 0, "--pages は1以上の整数で指定する");
         args
     }
 }
@@ -167,7 +168,7 @@ fn measure(path: &Path, count: usize) -> Row {
         }
     })
     .checked_div(updated as u32)
-    .unwrap_or_default();
+    .expect("更新の対象が無い");
     drop(store);
     remove_database(path);
 
