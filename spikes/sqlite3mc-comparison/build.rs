@@ -50,14 +50,21 @@ fn main() {
         "HAVE_USLEEP=1",
         "HAVE_ISNAN",
         "_POSIX_THREAD_SAFE_FUNCTIONS",
-        // 一時ファイルに平文を書かないよう、一時的なデータはメモリに置く。SQLCipherの同梱のビルドと同じ。
-        "SQLITE_TEMP_STORE=2",
     ] {
         match define.split_once('=') {
             Some((name, value)) => build.define(name, value),
             None => build.define(define, None),
         };
     }
+    // ターゲットによって付けるオプションも、`libsqlite3-sys` と同じく `TARGET` の文字列で判定する。
+    let target = std::env::var("TARGET").expect("TARGET が無い");
+    if !target.contains("windows") {
+        build.define("HAVE_LOCALTIME_R", None);
+    }
+    // 一時ファイルに平文を書かないよう、一時的なデータはメモリに置く。SQLCipherの同梱のビルドと同じく、
+    // Androidでは `PRAGMA temp_store` でもファイルに変えられない3にし、それ以外では既定をメモリにする2にする。
+    let temp_store = if target.contains("android") { "3" } else { "2" };
+    build.define("SQLITE_TEMP_STORE", temp_store);
     build.compile("sqlite3");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR が無い");
