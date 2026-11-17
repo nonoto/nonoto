@@ -5137,6 +5137,7 @@ dependencies = [
  "getrandom 0.4.3",
  "jiff",
  "keyring-core",
+ "loro",
  "pulldown-cmark",
  "rusqlite",
  "tempfile",
