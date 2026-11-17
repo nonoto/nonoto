@@ -1,12 +1,13 @@
 use std::fmt::Write as _;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
 use zeroize::Zeroize;
 
 use super::PageStore;
-use crate::error::Error;
+use crate::error::{Error, OpenStage};
 use crate::key::Key;
 use crate::page::{Page, PageId, PageSummary, PageUpdate};
 
@@ -20,14 +21,58 @@ pub struct SqlCipherStore {
 
 impl SqlCipherStore {
     /// データベースを鍵で開く。ファイルが無ければ作る。
+    ///
+    /// 鍵が違えば [`Error::WrongKey`] を、それ以外の失敗は失敗した段階を添えて [`Error::OpenStore`] を返す。
     pub fn open(path: &Path, key: &Key) -> Result<Self, Error> {
-        let mut conn = Connection::open(path)?;
-        // 鍵が違うときにSQLCipherが標準エラーへ書くログを止める。失敗はエラーの値で呼び出し元に返す。
-        conn.execute_batch("PRAGMA cipher_log_level = NONE;")?;
+        initialize().map_err(|err| open_error(OpenStage::Initialize, err))?;
+        let mut conn = connect(path).map_err(|err| open_error(OpenStage::Connect, err))?;
         apply_key(&conn, key)?;
         verify_key(&conn)?;
-        migrate(&mut conn)?;
+        migrate(&mut conn).map_err(|err| open_error(OpenStage::Migrate, err))?;
         Ok(Self { conn })
+    }
+}
+
+/// SQLiteとSQLCipherのプロセスの初期化を、1つのスレッドで済ませる。
+///
+/// SQLiteの `sqlite3_initialize` は、SQLCipherの初期化を終える前に初期化済みの印を立てる。
+/// その間に別のスレッドが接続を開くと、SQLCipherが初期化されていない接続に鍵を渡すことになり、`PRAGMA key` が失敗する。
+/// 鍵を渡す接続を開く前に、ここで初期化を最後まで済ませ、他のスレッドは済むまで待たせる。
+/// 待たせられるのはこの関数を通るスレッドだけなので、プロセスの中の接続は、テストのものも含めてすべてこの関数の後に開く。
+/// 失敗した場合も結果を保持する。SQLCipherだけが初期化されていない状態で、次の呼び出しが成功を返すことがあるためである。
+fn initialize() -> rusqlite::Result<()> {
+    static RESULT: OnceLock<i32> = OnceLock::new();
+    let code = *RESULT.get_or_init(|| {
+        // sqlite3_initializeはスレッドセーフで、OnceLockが1回にまとめて完了まで待つ。
+        // rusqliteの暗黙の初期化は失敗を読み捨てる経路があるため、その前に戻り値を直接受け取る。
+        unsafe { rusqlite::ffi::sqlite3_initialize() }
+    });
+    if code != rusqlite::ffi::SQLITE_OK {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn connect(path: &Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
+    // 鍵が違うときにSQLCipherが標準エラーへ書くログを止める。失敗はエラーの値で呼び出し元に返す。
+    conn.execute_batch("PRAGMA cipher_log_level = NONE;")?;
+    Ok(conn)
+}
+
+fn open_error(stage: OpenStage, source: rusqlite::Error) -> Error {
+    // 文の準備で失敗すると、rusqliteは `SqlInputError` を返し、`sqlite_error` はそのコードを返さない。
+    let extended_code = match &source {
+        rusqlite::Error::SqlInputError { error, .. } => Some(error.extended_code),
+        other => other.sqlite_error().map(|err| err.extended_code),
+    };
+    Error::OpenStore {
+        stage,
+        extended_code,
+        source,
     }
 }
 
@@ -35,16 +80,32 @@ impl SqlCipherStore {
 ///
 /// パスフレーズからの鍵の導出 (PBKDF2) を省くため、鍵をそのまま16進数で渡す。
 fn apply_key(conn: &Connection, key: &Key) -> Result<(), Error> {
-    let mut statement = String::with_capacity(16 + key.as_bytes().len() * 2);
-    statement.push_str("PRAGMA key = \"x'");
+    let mut hex = String::with_capacity(key.as_bytes().len() * 2);
     for byte in key.as_bytes() {
         // Stringへの書き込みは失敗しない。
-        let _ = write!(statement, "{byte:02x}");
+        let _ = write!(hex, "{byte:02x}");
     }
-    statement.push_str("'\";");
-    let result = conn.execute_batch(&statement);
+    let mut statement = format!("PRAGMA key = \"x'{hex}'\";");
+    let result = conn
+        .execute_batch(&statement)
+        .map_err(|err| open_error(OpenStage::ApplyKey, without_key(err, &hex)));
     statement.zeroize();
-    result.map_err(Error::from)
+    hex.zeroize();
+    result
+}
+
+/// 鍵を渡す文の失敗から、鍵が入りうる部分を取り除く。
+///
+/// rusqliteのエラーは失敗した文を持つことがあり、表示すると鍵の16進数が出るため、文を捨てる。
+/// SQLiteのメッセージも、鍵を含むときは捨てる。
+fn without_key(err: rusqlite::Error, hex: &str) -> rusqlite::Error {
+    let (error, msg) = match err {
+        rusqlite::Error::SqlInputError { error, msg, .. } => (error, Some(msg)),
+        rusqlite::Error::SqliteFailure(error, msg) => (error, msg),
+        other => return other,
+    };
+    let msg = msg.filter(|msg| !msg.to_ascii_lowercase().contains(hex));
+    rusqlite::Error::SqliteFailure(error, msg)
 }
 
 /// 鍵でデータベースを読めるかを確かめる。
@@ -54,11 +115,11 @@ fn verify_key(conn: &Connection) -> Result<(), Error> {
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
         .map_err(|err| match err.sqlite_error_code() {
             Some(rusqlite::ErrorCode::NotADatabase) => Error::WrongKey,
-            _ => Error::Database(err),
+            _ => open_error(OpenStage::VerifyKey, err),
         })
 }
 
-fn migrate(conn: &mut Connection) -> Result<(), Error> {
+fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     // 書き込み権を待った接続も、直前の初期化が保存した版で判断する。
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -570,6 +631,136 @@ mod tests {
                 "ファイルに平文が残っている: {plaintext}"
             );
         }
+    }
+
+    #[test]
+    fn 接続できないときは接続の段階とsqliteの拡張エラーコードを返す() {
+        let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
+        let path = dir.path().join("無いディレクトリ").join("nonoto.db");
+        let key = Key::generate().expect("鍵を作れなかった");
+
+        let result = SqlCipherStore::open(&path, &key);
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::OpenStore {
+                    stage: OpenStage::Connect,
+                    extended_code: Some(rusqlite::ffi::SQLITE_CANTOPEN),
+                    ..
+                })
+            ),
+            "接続できないときのエラーが、接続の段階のSQLITE_CANTOPENではない: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn スキーマを初期化できないときはスキーマの初期化の段階とsqliteの拡張エラーコードを返す() {
+        let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
+        let path = dir.path().join("nonoto.db");
+        let key = Key::generate().expect("鍵を作れなかった");
+        {
+            // 版は0のまま、初期化が作る表と同じ名前の表を先に作り、初期化の CREATE TABLE を失敗させる。
+            initialize().expect("SQLiteとSQLCipherを初期化できなかった");
+            let conn = Connection::open(&path).expect("接続を開けなかった");
+            apply_key(&conn, &key).expect("鍵を渡せなかった");
+            conn.execute_batch("CREATE TABLE pages (id TEXT);")
+                .expect("表を作れなかった");
+        }
+
+        let result = SqlCipherStore::open(&path, &key);
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::OpenStore {
+                    stage: OpenStage::Migrate,
+                    extended_code: Some(rusqlite::ffi::SQLITE_ERROR),
+                    ..
+                })
+            ),
+            "スキーマを初期化できないときのエラーが、スキーマの初期化の段階のSQLITE_ERRORではない: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn 鍵を渡す段階のエラーの表示に鍵を含めない() {
+        let key = Key::generate().expect("鍵を作れなかった");
+        let hex = key_hex(&key);
+        let statement = format!("PRAGMA key = \"x'{hex}'\";");
+        let failures = [
+            rusqlite::Error::SqlInputError {
+                error: rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                msg: format!("near \"x'{hex}'\": syntax error"),
+                sql: statement.clone(),
+                offset: 13,
+            },
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some(format!("unrecognized token: \"x'{}\"", hex.to_uppercase())),
+            ),
+        ];
+
+        for failure in failures {
+            let err = open_error(OpenStage::ApplyKey, without_key(failure, &hex));
+
+            let shown = error_text(&err).to_lowercase();
+            assert!(!shown.contains(&hex), "エラーの表示に鍵が含まれている");
+            assert!(
+                !shown.contains("pragma key ="),
+                "エラーの表示に鍵を渡す文が含まれている"
+            );
+            assert!(
+                matches!(
+                    err,
+                    Error::OpenStore {
+                        stage: OpenStage::ApplyKey,
+                        extended_code: Some(rusqlite::ffi::SQLITE_ERROR),
+                        ..
+                    }
+                ),
+                "鍵を渡す段階とエラーコードが残っていない: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn 鍵を渡す段階のエラーに鍵を含まないsqlcipherのメッセージを残す() {
+        let key = Key::generate().expect("鍵を作れなかった");
+        let hex = key_hex(&key);
+        let message = "An error occurred with PRAGMA key or rekey.";
+        let failure = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some(message.to_owned()),
+        );
+
+        let err = open_error(OpenStage::ApplyKey, without_key(failure, &hex));
+
+        assert!(
+            error_text(&err).contains(message),
+            "SQLCipherのメッセージが残っていない: {err:?}"
+        );
+    }
+
+    /// 鍵を、`apply_key` が鍵を渡す文に入れるのと同じ小文字の16進数にする。
+    fn key_hex(key: &Key) -> String {
+        key.as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    /// エラーと、その原因の連鎖の表示 (`Display` と `Debug`) をつなげる。
+    fn error_text(err: &Error) -> String {
+        let mut text = format!("{err} {err:?}");
+        let mut source = std::error::Error::source(err);
+        while let Some(cause) = source {
+            text.push_str(&format!(" {cause} {cause:?}"));
+            source = cause.source();
+        }
+        text
     }
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {

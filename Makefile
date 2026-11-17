@@ -24,6 +24,16 @@ test: fetch-sqlite3mc
 	cargo test --workspace --locked
 	cd $(SQLITE3MC_CRATE) && cargo test --locked
 
+# テストを RUNS 回繰り返し、失敗した回の出力を tmp/repeat-test/ に残す。
+# 繰り返すテストは REPEAT_TEST (cargo testの引数) で変えられる。既定は、プロセスで初めてストアを同時に開く再現のテスト。
+# 同時に開くスレッドの数は NONOTO_OPEN_THREADS で変えられる (既定は16)。
+RUNS ?= 300
+REPEAT_TEST ?= -p nonoto-core --test concurrent_open -- --ignored --exact プロセスで初めて別々のファイルのストアを同時に開ける
+
+.PHONY: repeat-test
+repeat-test:
+	scripts/repeat-test.sh $(RUNS) $(REPEAT_TEST)
+
 # sqlite3mcのソースを取得する。取得済みなら何もしない。
 .PHONY: fetch-sqlite3mc
 fetch-sqlite3mc:

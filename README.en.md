@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-15 -->
+<!-- last_synced: 2026-11-16 -->
 
 # Nonoto
 
@@ -35,6 +35,7 @@ make build-sqlite3mc-windows         # Build the sqlite3mc comparison for Window
 make measure-sqlite3mc               # Benchmark sqlite3mc and SQLCipher under the same conditions
 make screenshot-desktop              # Start the desktop app on a virtual display and save the screen to tmp/
 make screenshot-editor               # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
+make repeat-test                     # Repeat a test and keep the output of failed runs in tmp/repeat-test/
 ```
 
 The `nonoto` command and the desktop app share environment variables for the data location and the key storage.
@@ -43,6 +44,20 @@ The `nonoto` command and the desktop app share environment variables for the dat
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
 | `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
+
+## Repeating tests
+
+For rare failures, `make repeat-test` repeats a test, one process per run, to measure how often it fails.
+It keeps the output of failed runs and a summary of the conditions and results (`summary.txt`) in `tmp/repeat-test/<date-time>-<id>/`, and exits with status 1 if any run fails.
+
+```sh
+make repeat-test                                                    # Repeat the concurrent store-open test 300 times
+make repeat-test RUNS=1000 NONOTO_OPEN_THREADS=64                   # Change the number of runs and concurrent threads
+make repeat-test REPEAT_TEST="-p nonoto-core --lib store::sqlcipher"  # Repeat other tests, given as cargo test arguments
+```
+
+`make test` also repeats the concurrent store-open test 60 times, each run in a child process with 64 threads.
+Change the number of runs with `NONOTO_OPEN_PROCESSES` (for example, `make test NONOTO_OPEN_PROCESSES=10`).
 
 ## Benchmarking the encrypted store
 

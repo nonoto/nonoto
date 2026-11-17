@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-15 -->
+<!-- last_synced: 2026-11-16 -->
 
 # Nonoto
 
@@ -31,6 +31,7 @@ make build-sqlite3mc-windows         # Windows向けにsqlite3mcの比較のコ�
 make measure-sqlite3mc               # sqlite3mcとSQLCipherを同じ条件で計測する
 make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
 make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
+make repeat-test                     # テストを繰り返し、失敗した回の出力を tmp/repeat-test/ に残す
 ```
 
 データの置き場と鍵の保管場所は、コマンド `nonoto` とデスクトップアプリで共通の環境変数で変えられます。
@@ -39,6 +40,20 @@ make screenshot-editor               # 記法の見本のページを編集の�
 | ------------------ | --------------------------------------------------------------------------------------------------- |
 | `NONOTO_DATA_DIR`  | データの置き場。省略するとOSの慣習に沿った置き場 (macOSでは `~/Library/Application Support/nonoto`) |
 | `NONOTO_KEY_STORE` | 鍵の保管場所 (`keychain` か `file`)。省略するとmacOSとWindowsではキーチェーン、それ以外ではファイル |
+
+## テストを繰り返して確かめる
+
+まれにしか起きない失敗は、`make repeat-test` でテストをプロセスごと繰り返して頻度を見ます。
+失敗した回の出力と、条件と結果のまとめ (`summary.txt`) を `tmp/repeat-test/<日時>-<識別子>/` に残し、1回でも失敗すると終了コード1で終わります。
+
+```sh
+make repeat-test                                                    # ストアを同時に開く再現のテストを300回繰り返す
+make repeat-test RUNS=1000 NONOTO_OPEN_THREADS=64                   # 回数と同時に開くスレッドの数を変える
+make repeat-test REPEAT_TEST="-p nonoto-core --lib store::sqlcipher"  # 繰り返すテストを cargo test の引数で変える
+```
+
+`make test` も、ストアを同時に開く再現のテストを、子のプロセスとして60回繰り返します (1回に64スレッド)。
+回数は `NONOTO_OPEN_PROCESSES` で変えられます (例: `make test NONOTO_OPEN_PROCESSES=10`)。
 
 ## 暗号化ストアを計測する
 
