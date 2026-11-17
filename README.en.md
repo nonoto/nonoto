@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-15 -->
+<!-- last_synced: 2026-11-16 -->
 
 # Nonoto
 
@@ -20,6 +20,7 @@ The Japanese [README.md](./README.md) is the canonical version, and this file is
 | `crates/nonoto-desktop`       | The GPUI desktop app                                                     |
 | `spikes/store-comparison`     | Code comparing approaches to the encrypted store                         |
 | `spikes/sqlite3mc-comparison` | Code comparing SQLCipher and sqlite3mc (outside the workspace)           |
+| `spikes/crdt-comparison`      | Code comparing CRDT libraries for page bodies (yrs, Automerge, Loro)     |
 
 ## Developing in the dev container
 
@@ -32,9 +33,12 @@ make test                            # Run the tests
 make build-core-windows              # Build the core for Windows
 make build-store-comparison-windows  # Build the encrypted store benchmark for Windows
 make build-sqlite3mc-windows         # Build the sqlite3mc comparison for Windows
+make build-crdt-comparison-windows   # Build the CRDT library comparison for Windows
 make measure-sqlite3mc               # Benchmark sqlite3mc and SQLCipher under the same conditions
+make measure-crdt-comparison         # Benchmark the CRDT library candidates on the same document
 make screenshot-desktop              # Start the desktop app on a virtual display and save the screen to tmp/
 make screenshot-editor               # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
+make repeat-test                     # Repeat a test and keep the output of failed runs in tmp/repeat-test/
 ```
 
 The `nonoto` command and the desktop app share environment variables for the data location and the key storage.
@@ -43,6 +47,20 @@ The `nonoto` command and the desktop app share environment variables for the dat
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
 | `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
+
+## Repeating tests
+
+For rare failures, `make repeat-test` repeats a test, one process per run, to measure how often it fails.
+It keeps the output of failed runs and a summary of the conditions and results (`summary.txt`) in `tmp/repeat-test/<date-time>-<id>/`, and exits with status 1 if any run fails.
+
+```sh
+make repeat-test                                                    # Repeat the concurrent store-open test 300 times
+make repeat-test RUNS=1000 NONOTO_OPEN_THREADS=64                   # Change the number of runs and concurrent threads
+make repeat-test REPEAT_TEST="-p nonoto-core --lib store::sqlcipher"  # Repeat other tests, given as cargo test arguments
+```
+
+`make test` also repeats the concurrent store-open test 60 times, each run in a child process with 64 threads.
+Change the number of runs with `NONOTO_OPEN_PROCESSES` (for example, `make test NONOTO_OPEN_PROCESSES=10`).
 
 ## Benchmarking the encrypted store
 
@@ -78,6 +96,21 @@ make measure-sqlite3mc MEASURE_PAGES=1000  # Benchmark with a different number o
 
 This builds the sqlite3mc version and the SQLCipher version (the `sqlcipher` feature), measures both with the same number of pages, and shows saving all pages, startup, memory added at startup, saving and updating one page, and the file size in one table.
 The SQLCipher version builds a bundled OpenSSL, so its first build takes several minutes.
+
+## Benchmarking the CRDT libraries
+
+Benchmarks the CRDT library candidates for page bodies (yrs, Automerge, Loro) on a document built from the same input sequence.
+
+```sh
+make measure-crdt-comparison             # Benchmark with a 5,000-line document
+make measure-crdt-comparison LINES=1000  # Benchmark with a different number of lines
+```
+
+The document is built from an empty state by applying an input sequence (typing one character at a time, IME commits, deletions for retyping, and pastes).
+The input sequence is generated from a random number generator with a fixed seed, so every run produces the same content.
+The results are written to standard output as Markdown, with one table listing the time to apply one edit and to load, the sizes of updates, snapshots, and version identifiers, and the memory added by loading.
+The final "required conditions" table shows whether each candidate met the conditions (applying one edit within 5 ms and loading within 100 ms).
+In the dev container, 5,000 lines take about one minute.
 
 ## Checking on a Mac
 

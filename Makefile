@@ -24,6 +24,16 @@ test: fetch-sqlite3mc
 	cargo test --workspace --locked
 	cd $(SQLITE3MC_CRATE) && cargo test --locked
 
+# テストを RUNS 回繰り返し、失敗した回の出力を tmp/repeat-test/ に残す。
+# 繰り返すテストは REPEAT_TEST (cargo testの引数) で変えられる。既定は、プロセスで初めてストアを同時に開く再現のテスト。
+# 同時に開くスレッドの数は NONOTO_OPEN_THREADS で変えられる (既定は16)。
+RUNS ?= 300
+REPEAT_TEST ?= -p nonoto-core --test concurrent_open -- --ignored --exact プロセスで初めて別々のファイルのストアを同時に開ける
+
+.PHONY: repeat-test
+repeat-test:
+	scripts/repeat-test.sh $(RUNS) $(REPEAT_TEST)
+
 # sqlite3mcのソースを取得する。取得済みなら何もしない。
 .PHONY: fetch-sqlite3mc
 fetch-sqlite3mc:
@@ -37,6 +47,11 @@ build-core-windows:
 .PHONY: build-store-comparison-windows
 build-store-comparison-windows:
 	cargo build -p store-comparison --target $(WINDOWS_TARGET) --locked
+
+# CRDTのライブラリを比べるコードを、Windows向けにビルドする。
+.PHONY: build-crdt-comparison-windows
+build-crdt-comparison-windows:
+	cargo build -p crdt-comparison --target $(WINDOWS_TARGET) --locked
 
 # sqlite3mcにリンクする比較のコードを、Windows向けにビルドする。
 .PHONY: build-sqlite3mc-windows
@@ -53,6 +68,11 @@ measure-sqlite3mc: fetch-sqlite3mc
 	cd $(SQLITE3MC_CRATE) && cargo build --release --locked --features sqlcipher --target-dir ../../target/sqlite3mc-comparison-sqlcipher
 	target/sqlite3mc-comparison/release/sqlite3mc-comparison --pages $(MEASURE_PAGES) \
 		--baseline target/sqlite3mc-comparison-sqlcipher/release/sqlite3mc-comparison
+
+# CRDTのライブラリの候補を、同じ入力の列で作った文書で計測する。行数は LINES で変えられる (既定は5000)。
+.PHONY: measure-crdt-comparison
+measure-crdt-comparison:
+	cargo run --release --locked -p crdt-comparison -- --lines $(LINES)
 
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop

@@ -8,6 +8,8 @@ publish.workspace = true
 dirs = "7.0.0"
 getrandom = "0.4.3"
 jiff = "0.2.43"
+# ページの本文をCRDTで持つ文書 (`document`) に使う。
+loro = "1.17.1"
 pulldown-cmark = { version = "0.13.6", default-features = false }
 rusqlite = { version = "0.42.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 thiserror = "2.0.21"
