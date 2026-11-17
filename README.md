@@ -9,13 +9,14 @@ Nonotoは、正本を手元の端末に置くローカルファーストなド�
 
 ## 構成
 
-| ディレクトリ                  | 内容                                                           |
-| ----------------------------- | -------------------------------------------------------------- |
-| `crates/nonoto-core`          | ページの操作・端末上の暗号化ストア・鍵の保管                   |
-| `crates/nonoto-cli`           | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON) |
-| `crates/nonoto-desktop`       | GPUIのデスクトップアプリ                                       |
-| `spikes/store-comparison`     | 暗号化ストアの方式を比べるコード                               |
-| `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)        |
+| ディレクトリ                  | 内容                                                             |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `crates/nonoto-core`          | ページの操作・端末上の暗号化ストア・鍵の保管                     |
+| `crates/nonoto-cli`           | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON)   |
+| `crates/nonoto-desktop`       | GPUIのデスクトップアプリ                                         |
+| `spikes/store-comparison`     | 暗号化ストアの方式を比べるコード                                 |
+| `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)          |
+| `spikes/crdt-comparison`      | 本文を持つCRDTのライブラリ (yrs・Automerge・Loro) を比べるコード |
 
 ## 開発コンテナでの開発
 
@@ -28,7 +29,9 @@ make test                            # テストを実行する
 make build-core-windows              # Windows向けにコアをビルドする
 make build-store-comparison-windows  # Windows向けに暗号化ストアの計測のコードをビルドする
 make build-sqlite3mc-windows         # Windows向けにsqlite3mcの比較のコードをビルドする
+make build-crdt-comparison-windows   # Windows向けにCRDTのライブラリの比較のコードをビルドする
 make measure-sqlite3mc               # sqlite3mcとSQLCipherを同じ条件で計測する
+make measure-crdt-comparison         # CRDTのライブラリの候補を同じ文書で計測する
 make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
 make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
 make repeat-test                     # テストを繰り返し、失敗した回の出力を tmp/repeat-test/ に残す
@@ -89,6 +92,21 @@ make measure-sqlite3mc MEASURE_PAGES=1000  # 件数を変えて計測する
 
 sqlite3mc版とSQLCipher版 (機能 `sqlcipher`) をビルドし、同じ件数で計って、全件の保存・起動・起動で増えたメモリ・1件の保存と更新・ファイルの大きさを1つの表に並べます。
 SQLCipher版は、OpenSSLを同梱してビルドするため、初めてのビルドに数分かかります。
+
+## CRDTのライブラリを計測する
+
+本文を持つCRDTのライブラリの候補 (yrs・Automerge・Loro) を、同じ入力の列で作った文書で計測します。
+
+```sh
+make measure-crdt-comparison             # 5000行の文書で計測する
+make measure-crdt-comparison LINES=1000  # 行数を変えて計測する
+```
+
+文書は、空の状態から入力の列 (1文字ずつの入力・IMEの確定・打ち直しの削除・貼り付け) を当てて作ります。
+入力の列は固定した種の乱数で作るため、実行のたびに同じ内容になります。
+結果はMarkdownで標準出力に書き、編集1件の適用・読み込みの時間と、更新・スナップショット・版を指す値の大きさ・読み込みで増えたメモリを1つの表に並べます。
+最後の「必須の条件」の表に、候補ごとに条件 (編集1件の適用が5ms以内・読み込みが100ms以内) を満たしたかを示します。
+開発コンテナでは、5000行で1分ほどかかります。
 
 ## Macで確かめる
 

@@ -1,0 +1,14 @@
+[package]
+name = "crdt-comparison"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+automerge = "=0.12.0"
+loro = "=1.17.1"
+thiserror = "2.0.21"
+yrs = "=0.28.1"
+
+[lints]
+workspace = true

@@ -82,6 +82,8 @@ jobs:
       - run: cargo build -p nonoto-core --target ${{ matrix.target }} --locked
       # 全文検索のトークナイザーをCのAPIで登録するコードも、各OS向けにビルドできることを確かめる。
       - run: cargo build -p store-comparison --target ${{ matrix.target }} --locked
+      # CRDTのライブラリの比較のコードも、各OS向けにビルドできることを確かめる。
+      - run: cargo build -p crdt-comparison --target ${{ matrix.target }} --locked
       # OpenSSLに依存しない暗号化の実装 (sqlite3mc) も、各OS向けにビルドできることを確かめる。
       # 設定 (.cargo/config.toml) を読ませるため、クレートのディレクトリでビルドする。
       - name: sqlite3mcのソースを取得する

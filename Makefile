@@ -48,6 +48,11 @@ build-core-windows:
 build-store-comparison-windows:
 	cargo build -p store-comparison --target $(WINDOWS_TARGET) --locked
 
+# CRDTのライブラリを比べるコードを、Windows向けにビルドする。
+.PHONY: build-crdt-comparison-windows
+build-crdt-comparison-windows:
+	cargo build -p crdt-comparison --target $(WINDOWS_TARGET) --locked
+
 # sqlite3mcにリンクする比較のコードを、Windows向けにビルドする。
 .PHONY: build-sqlite3mc-windows
 build-sqlite3mc-windows: fetch-sqlite3mc
@@ -63,6 +68,11 @@ measure-sqlite3mc: fetch-sqlite3mc
 	cd $(SQLITE3MC_CRATE) && cargo build --release --locked --features sqlcipher --target-dir ../../target/sqlite3mc-comparison-sqlcipher
 	target/sqlite3mc-comparison/release/sqlite3mc-comparison --pages $(MEASURE_PAGES) \
 		--baseline target/sqlite3mc-comparison-sqlcipher/release/sqlite3mc-comparison
+
+# CRDTのライブラリの候補を、同じ入力の列で作った文書で計測する。行数は LINES で変えられる (既定は5000)。
+.PHONY: measure-crdt-comparison
+measure-crdt-comparison:
+	cargo run --release --locked -p crdt-comparison -- --lines $(LINES)
 
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop
