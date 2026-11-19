@@ -89,7 +89,7 @@ fn wikiリンクの題名は記号と分けてimeで数文字ずつ確定する(
 
 fn 入力の列から作った文書の本文が一致する<R: Replica>() {
     let dataset = japanese_markdown(200, 3);
-    let doc = build::<R>(&dataset).unwrap();
+    let doc = build::<R>(&dataset).expect("入力の列から文書を作れなかった");
     assert_eq!(doc.text(), dataset.text, "{}", R::NAME);
 }
 

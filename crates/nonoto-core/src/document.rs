@@ -3,8 +3,9 @@
 //! 位置は、入力の部品と同じくUTF-8のバイト位置で扱う。
 //! CRDTのライブラリ (Loro) の型は公開APIに出さず、更新とスナップショットはバイト列を包んだ型で渡す。
 
+use std::fmt;
 use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use loro::event::{Diff, DiffEvent};
 use loro::{ContainerTrait, EncodedBlobMode, ExportMode, LoroDoc, LoroText, TextDelta};
@@ -91,11 +92,19 @@ pub fn map_position(mut pos: usize, replacements: &[Replacement], affinity: Affi
 }
 
 /// ページ1件の本文を持つ文書。
+///
+/// デバッグ表示では本文を伏せる。
 pub struct Document {
     doc: LoroDoc,
     text: LoroText,
     /// 今の本文。Loroの差分はコードポイントで数えるため、届いた差分をバイト位置にするのにも使う。
     body: String,
+}
+
+impl fmt::Debug for Document {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Document").finish_non_exhaustive()
+    }
 }
 
 impl Document {
@@ -200,7 +209,7 @@ impl Document {
         let subscription = self.doc.subscribe(
             &self.text.id(),
             Arc::new(move |event: DiffEvent| {
-                let mut sink = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
                 for container in event.events {
                     if let Diff::Text(deltas) = container.diff {
                         sink.extend(deltas);
@@ -212,8 +221,7 @@ impl Document {
         drop(subscription);
         result.map_err(|_| Error::InvalidUpdate)?;
 
-        let deltas =
-            std::mem::take(&mut *ops.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        let deltas = std::mem::take(&mut *ops.lock().unwrap_or_else(PoisonError::into_inner));
         let replacements = replacements_from_deltas(&self.body, deltas);
         self.body = Replacement::apply_all(&self.body, &replacements);
         Ok(replacements)
@@ -320,8 +328,9 @@ mod tests {
     const MIXED: &str = "漢字とかな😀👨\u{200D}👩\u{200D}👧🇯🇵\r\nか\u{3099}が\r\n";
 
     fn pair(body: &str) -> (Document, Document) {
-        let a = Document::new(body).unwrap();
-        let b = Document::from_snapshot(&a.snapshot().unwrap()).unwrap();
+        let a = Document::new(body).expect("文書を作れなかった");
+        let b = Document::from_snapshot(&a.snapshot().expect("スナップショットを出力できなかった"))
+            .expect("スナップショットから文書を作れなかった");
         (a, b)
     }
 
@@ -331,25 +340,46 @@ mod tests {
 
     /// 全体の置き換えを、最小にせずにそのまま当てたときの更新。比べるためだけに使う。
     fn naive_full_replace(body: &str, text: &str) -> Update {
-        let mut document =
-            Document::from_snapshot(&Document::new(body).unwrap().snapshot().unwrap()).unwrap();
+        let mut document = Document::from_snapshot(
+            &Document::new(body)
+                .expect("文書を作れなかった")
+                .snapshot()
+                .expect("スナップショットを出力できなかった"),
+        )
+        .expect("スナップショットから文書を作れなかった");
         let len = document.text().len();
-        document.replace(0..len, text).unwrap()
+        document
+            .replace(0..len, text)
+            .expect("本文を置き換えられなかった")
     }
 
     #[test]
     fn 本文の文字列から作った文書はその本文を持つ() {
-        let document = Document::new(MIXED).unwrap();
+        let document = Document::new(MIXED).expect("文書を作れなかった");
         assert_eq!(document.text(), MIXED);
-        assert_eq!(Document::new("").unwrap().text(), "");
+        assert_eq!(Document::new("").expect("文書を作れなかった").text(), "");
+    }
+
+    #[test]
+    fn 文書をデバッグ表示しても本文を出さない() {
+        let body = "デバッグ表示から伏せる本文";
+        let document = Document::new(body).expect("文書を作れなかった");
+
+        assert!(
+            !format!("{document:?}").contains(body),
+            "文書のデバッグ表示に本文が含まれている"
+        );
     }
 
     #[test]
     fn スナップショットから読み込んだ文書は同じ本文を持ち同じ文書として編集できる() {
         let (mut a, mut b) = pair(MIXED);
         assert_eq!(b.text(), MIXED);
-        let update = b.apply_local(0..0, "前").unwrap().unwrap();
-        a.apply_remote(&update).unwrap();
+        let update = b
+            .apply_local(0..0, "前")
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
+        a.apply_remote(&update).expect("更新を当てられなかった");
         assert_eq!(a.text(), format!("前{MIXED}"));
     }
 
@@ -362,7 +392,10 @@ mod tests {
         let mut committed = body.clone();
         committed.insert_str(at, "漢字");
 
-        let update = a.apply_local(0..body.len(), &committed).unwrap().unwrap();
+        let update = a
+            .apply_local(0..body.len(), &committed)
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
         let naive = naive_full_replace(&body, &committed);
         assert!(
             update.as_bytes().len() * 10 < naive.as_bytes().len(),
@@ -371,7 +404,7 @@ mod tests {
             naive.as_bytes().len()
         );
 
-        let replacements = b.apply_remote(&update).unwrap();
+        let replacements = b.apply_remote(&update).expect("更新を当てられなかった");
         assert_eq!(
             replacements,
             vec![Replacement {
@@ -425,13 +458,16 @@ mod tests {
         // aは「二」を消し、「四」の後ろに挿入する。2か所を1回の置き換えにすると「二三四」を「三四挿」にする置き換えになる。
         let update_a = a
             .apply_local(0.."一二三四五".len(), "一三四挿五")
-            .unwrap()
-            .unwrap();
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
         // bは同時に、「三」の前に挿入する。
         let at = pos(b.text(), "三");
-        let update_b = b.apply_local(at..at, "割").unwrap().unwrap();
-        a.apply_remote(&update_b).unwrap();
-        b.apply_remote(&update_a).unwrap();
+        let update_b = b
+            .apply_local(at..at, "割")
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
+        a.apply_remote(&update_b).expect("更新を当てられなかった");
+        b.apply_remote(&update_a).expect("更新を当てられなかった");
 
         assert_eq!(a.text(), b.text());
         // 「三」は消して入れ直されるため、bの挿入は入れ直した「三」の前に付かず、置き換えの前か後ろに寄る。
@@ -445,18 +481,27 @@ mod tests {
 
     #[test]
     fn 本文が変わらない編集は更新を出さない() {
-        let mut document = Document::new("あいう").unwrap();
+        let mut document = Document::new("あいう").expect("文書を作れなかった");
         assert_eq!(
-            document.apply_local(0.."あいう".len(), "あいう").unwrap(),
+            document
+                .apply_local(0.."あいう".len(), "あいう")
+                .expect("手元の編集を当てられなかった"),
             None
         );
-        assert_eq!(document.apply_local(3..3, "").unwrap(), None);
+        assert_eq!(
+            document
+                .apply_local(3..3, "")
+                .expect("手元の編集を当てられなかった"),
+            None
+        );
     }
 
     #[test]
     fn 本文の外や文字の途中を指す範囲はエラーにして文書を変えない() {
-        let mut document = Document::new("あい").unwrap();
-        let before = document.snapshot().unwrap();
+        let mut document = Document::new("あい").expect("文書を作れなかった");
+        let before = document
+            .snapshot()
+            .expect("スナップショットを出力できなかった");
         // 終わりが始まりより前の範囲も、エラーにする。
         let reversed = Range { start: 4, end: 3 };
         for range in [1..1, 0..1, 3..4, 0..7, reversed] {
@@ -468,7 +513,12 @@ mod tests {
                 "範囲 {range:?} がエラーにならなかった"
             );
             assert_eq!(document.text(), "あい");
-            assert_eq!(document.snapshot().unwrap(), before);
+            assert_eq!(
+                document
+                    .snapshot()
+                    .expect("スナップショットを出力できなかった"),
+                before
+            );
         }
     }
 
@@ -482,29 +532,45 @@ mod tests {
         let family = "👨\u{200D}👩\u{200D}👧";
         let next = a.text().replacen(family, "", 1);
         let len = a.text().len();
-        updates_a.push(a.apply_local(0..len, &next).unwrap().unwrap());
+        updates_a.push(
+            a.apply_local(0..len, &next)
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった"),
+        );
         let mut next = a.text().to_owned();
         next.insert(pos(&next, "\r\n") + 2, '行');
         let len = a.text().len();
-        updates_a.push(a.apply_local(0..len, &next).unwrap().unwrap());
+        updates_a.push(
+            a.apply_local(0..len, &next)
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった"),
+        );
 
         // bは結合文字の濁点だけを消し、国旗の前と先頭に挿入する。
         let at = pos(b.text(), "\u{3099}");
         updates_b.push(
             b.apply_local(at..at + "\u{3099}".len(), "")
-                .unwrap()
-                .unwrap(),
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった"),
         );
         let at = pos(b.text(), "🇯🇵");
-        updates_b.push(b.apply_local(at..at, "🇺🇸").unwrap().unwrap());
-        updates_b.push(b.apply_local(0..0, "# ").unwrap().unwrap());
+        updates_b.push(
+            b.apply_local(at..at, "🇺🇸")
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった"),
+        );
+        updates_b.push(
+            b.apply_local(0..0, "# ")
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった"),
+        );
 
         // 順を入れ替えて届ける。
         for update in updates_b.iter().rev() {
-            a.apply_remote(update).unwrap();
+            a.apply_remote(update).expect("更新を当てられなかった");
         }
         for update in &updates_a {
-            b.apply_remote(update).unwrap();
+            b.apply_remote(update).expect("更新を当てられなかった");
         }
         assert_eq!(a.text(), b.text());
         assert_eq!(a.text(), "# 漢字とかな😀🇺🇸🇯🇵\r\n行かが\r\n");
@@ -531,22 +597,27 @@ mod tests {
 
     fn run_edit_session(seed: u64) -> EditSession {
         // 初期本文の挿入も含めて再現するため、書き手は本文を入れる前に固定する。
-        let base = u64::from(seed as u32) * 2;
+        const FRAGMENTS: &[&str] = &["あ", "漢字", "😀", "👨\u{200D}👩\u{200D}👧", "\r\n", "a"];
+        // 2倍しても溢れないよう、種の下位32ビットから書き手のIDを決める。
+        let base = (seed & u64::from(u32::MAX)) * 2;
         let doc = LoroDoc::new();
-        doc.set_peer_id(base).unwrap();
+        doc.set_peer_id(base).expect("書き手のIDを設定できなかった");
         let mut a = Document::with_doc(doc);
-        a.replace(0..0, MIXED).unwrap();
-        let mut b = Document::from_snapshot(&a.snapshot().unwrap()).unwrap();
-        b.doc.set_peer_id(base + 1).unwrap();
+        a.replace(0..0, MIXED).expect("本文を置き換えられなかった");
+        let mut b =
+            Document::from_snapshot(&a.snapshot().expect("スナップショットを出力できなかった"))
+                .expect("スナップショットから文書を作れなかった");
+        b.doc
+            .set_peer_id(base + 1)
+            .expect("書き手のIDを設定できなかった");
         let writers = [a.doc.peer_id(), b.doc.peer_id()];
         let mut events = Vec::new();
         let mut next_update = 0;
-        const FRAGMENTS: &[&str] = &["あ", "漢字", "😀", "👨\u{200D}👩\u{200D}👧", "\r\n", "a"];
         let mut state = seed;
         let mut next = |n: usize| {
             state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             (state >> 33) as usize % n
         };
         for step in 0..200 {
@@ -571,7 +642,10 @@ mod tests {
                     text: text.to_owned(),
                 },
             });
-            let Some(update) = b.apply_local(start..end, text).unwrap() else {
+            let Some(update) = b
+                .apply_local(start..end, text)
+                .expect("手元の編集を当てられなかった")
+            else {
                 continue;
             };
             let remote_id = next_update;
@@ -586,8 +660,11 @@ mod tests {
                         text: "手".to_owned(),
                     },
                 });
-                let local = a.apply_local(len..len, "手").unwrap().unwrap();
-                b.apply_remote(&local).unwrap();
+                let local = a
+                    .apply_local(len..len, "手")
+                    .expect("手元の編集を当てられなかった")
+                    .expect("本文が変わる編集なのに更新が出なかった");
+                b.apply_remote(&local).expect("更新を当てられなかった");
                 events.push(SessionEvent::Deliver {
                     replica: 1,
                     update: next_update,
@@ -595,7 +672,7 @@ mod tests {
                 next_update += 1;
             }
             let before = a.text().to_owned();
-            let replacements = a.apply_remote(&update).unwrap();
+            let replacements = a.apply_remote(&update).expect("更新を当てられなかった");
             events.push(SessionEvent::Deliver {
                 replica: 0,
                 update: remote_id,
@@ -629,25 +706,37 @@ mod tests {
     #[test]
     fn 前の更新が届いていない更新は保留され前の更新が届いたときに両方の変更を返す() {
         let (mut a, mut b) = pair("あいう");
-        let first = b.apply_local(0..0, "前").unwrap().unwrap();
-        let second = b.apply_local(0..0, "後").unwrap().unwrap();
+        let first = b
+            .apply_local(0..0, "前")
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
+        let second = b
+            .apply_local(0..0, "後")
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
 
-        assert_eq!(a.apply_remote(&second).unwrap(), Vec::new());
+        assert_eq!(
+            a.apply_remote(&second).expect("更新を当てられなかった"),
+            Vec::new()
+        );
         assert_eq!(a.text(), "あいう");
-        let replacements = a.apply_remote(&first).unwrap();
+        let replacements = a.apply_remote(&first).expect("更新を当てられなかった");
         assert_eq!(
             Replacement::apply_all("あいう", &replacements),
             "後前あいう"
         );
         assert_eq!(a.text(), "後前あいう");
         // 同じ更新を重ねて当てても変わらない。
-        assert_eq!(a.apply_remote(&first).unwrap(), Vec::new());
+        assert_eq!(
+            a.apply_remote(&first).expect("更新を当てられなかった"),
+            Vec::new()
+        );
         assert_eq!(a.text(), "後前あいう");
     }
 
     #[test]
     fn 壊れた更新とスナップショットはエラーになる() {
-        let mut document = Document::new("あいう").unwrap();
+        let mut document = Document::new("あいう").expect("文書を作れなかった");
         assert!(matches!(
             document.apply_remote(&Update::from_bytes(vec![1, 2, 3])),
             Err(Error::InvalidUpdate)
@@ -662,18 +751,24 @@ mod tests {
     #[test]
     fn 履歴を省略したスナップショットを拒否し完全な履歴では同じ更新を適用できる() {
         let author = LoroDoc::new();
-        author.set_peer_id(1).unwrap();
+        author.set_peer_id(1).expect("書き手のIDを設定できなかった");
         let text = author.get_text(BODY);
-        text.insert(0, "a").unwrap();
+        text.insert(0, "a")
+            .expect("Loroの文書に文字列を挿入できなかった");
         author.commit();
         let old = author.oplog_frontiers();
-        text.insert(1, "b").unwrap();
+        text.insert(1, "b")
+            .expect("Loroの文書に文字列を挿入できなかった");
         author.commit();
-        let full = Snapshot(author.export(ExportMode::Snapshot).unwrap());
+        let full = Snapshot(
+            author
+                .export(ExportMode::Snapshot)
+                .expect("Loroの文書を出力できなかった"),
+        );
         let shallow = Snapshot(
             author
                 .export(ExportMode::shallow_snapshot(&author.oplog_frontiers()))
-                .unwrap(),
+                .expect("Loroの文書を出力できなかった"),
         );
         assert!(matches!(
             Document::from_snapshot(&shallow),
@@ -681,25 +776,48 @@ mod tests {
         ));
 
         // 履歴を省略した文書では、一部の変更を当てたあとにエラーになる更新を作る。
-        text.insert(2, "c").unwrap();
+        text.insert(2, "c")
+            .expect("Loroの文書に文字列を挿入できなかった");
         author.commit();
-        let other =
-            LoroDoc::from_snapshot(&author.export(ExportMode::snapshot_at(&old)).unwrap()).unwrap();
-        other.set_peer_id(2).unwrap();
-        other.get_text(BODY).insert(0, "x").unwrap();
+        let other = LoroDoc::from_snapshot(
+            &author
+                .export(ExportMode::snapshot_at(&old))
+                .expect("Loroの文書を出力できなかった"),
+        )
+        .expect("スナップショットからLoroの文書を作れなかった");
+        other.set_peer_id(2).expect("書き手のIDを設定できなかった");
+        other
+            .get_text(BODY)
+            .insert(0, "x")
+            .expect("Loroの文書に文字列を挿入できなかった");
         other.commit();
         author
-            .import(&other.export(ExportMode::all_updates()).unwrap())
-            .unwrap();
-        let update = Update(author.export(ExportMode::all_updates()).unwrap());
-        let mut document = Document::from_snapshot(&full).unwrap();
-        let replacements = document.apply_remote(&update).unwrap();
+            .import(
+                &other
+                    .export(ExportMode::all_updates())
+                    .expect("Loroの文書を出力できなかった"),
+            )
+            .expect("Loroの文書に更新を取り込めなかった");
+        let update = Update(
+            author
+                .export(ExportMode::all_updates())
+                .expect("Loroの文書を出力できなかった"),
+        );
+        let mut document =
+            Document::from_snapshot(&full).expect("スナップショットから文書を作れなかった");
+        let replacements = document
+            .apply_remote(&update)
+            .expect("更新を当てられなかった");
         assert_eq!(Replacement::apply_all("ab", &replacements), "xabc");
         assert_eq!(document.text(), "xabc");
         assert_eq!(
-            Document::from_snapshot(&document.snapshot().unwrap())
-                .unwrap()
-                .text(),
+            Document::from_snapshot(
+                &document
+                    .snapshot()
+                    .expect("スナップショットを出力できなかった")
+            )
+            .expect("スナップショットから文書を作れなかった")
+            .text(),
             document.text()
         );
     }
@@ -707,26 +825,42 @@ mod tests {
     #[test]
     fn 更新の型で渡されたスナップショットを拒否しても文書は変わらず編集できる() {
         let source = LoroDoc::new();
-        source.get_text(BODY).insert(0, "別の本文").unwrap();
+        source
+            .get_text(BODY)
+            .insert(0, "別の本文")
+            .expect("Loroの文書に文字列を挿入できなかった");
         source.commit();
-        let full = source.export(ExportMode::Snapshot).unwrap();
+        let full = source
+            .export(ExportMode::Snapshot)
+            .expect("Loroの文書を出力できなかった");
         let shallow = source
             .export(ExportMode::shallow_snapshot(&source.oplog_frontiers()))
-            .unwrap();
+            .expect("Loroの文書を出力できなかった");
         for body in ["", MIXED] {
-            let mut document = Document::new(body).unwrap();
-            let before = document.snapshot().unwrap();
+            let mut document = Document::new(body).expect("文書を作れなかった");
+            let before = document
+                .snapshot()
+                .expect("スナップショットを出力できなかった");
             for snapshot in [&full, &shallow] {
                 assert!(matches!(
                     document.apply_remote(&Update::from_bytes(snapshot.clone())),
                     Err(Error::InvalidUpdate)
                 ));
                 assert_eq!(document.text(), body);
-                assert_eq!(document.snapshot().unwrap(), before);
+                assert_eq!(
+                    document
+                        .snapshot()
+                        .expect("スナップショットを出力できなかった"),
+                    before
+                );
             }
-            let update = document.apply_local(0..0, "続き").unwrap().unwrap();
-            let mut other = Document::from_snapshot(&before).unwrap();
-            other.apply_remote(&update).unwrap();
+            let update = document
+                .apply_local(0..0, "続き")
+                .expect("手元の編集を当てられなかった")
+                .expect("本文が変わる編集なのに更新が出なかった");
+            let mut other =
+                Document::from_snapshot(&before).expect("スナップショットから文書を作れなかった");
+            other.apply_remote(&update).expect("更新を当てられなかった");
             assert_eq!(document.text(), format!("続き{body}"));
             assert_eq!(document.text(), other.text());
         }
@@ -734,8 +868,11 @@ mod tests {
 
     #[test]
     fn スナップショットの型で渡された更新を拒否する() {
-        let mut document = Document::new("本文").unwrap();
-        let update = document.apply_local(0..0, "前").unwrap().unwrap();
+        let mut document = Document::new("本文").expect("文書を作れなかった");
+        let update = document
+            .apply_local(0..0, "前")
+            .expect("手元の編集を当てられなかった")
+            .expect("本文が変わる編集なのに更新が出なかった");
         assert!(matches!(
             Document::from_snapshot(&Snapshot::from_bytes(update.as_bytes().to_vec())),
             Err(Error::InvalidSnapshot)

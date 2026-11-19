@@ -25,5 +25,33 @@ cc = "1.11.1"
 tempfile = "3.27.0"
 
 # ワークスペースの `[workspace.lints]` を引き継げないため、同じ設定を書く。
+[lints.rust]
+# unsafeのコードは、使うモジュールでこのリントを抑えたときだけ書ける。
+unsafe_code = "deny"
+# 公開する型にDebugを実装させる (Rust API GuidelinesのC-DEBUG)。
+missing_debug_implementations = "warn"
+
 [lints.clippy]
+# clippyの既定のリント (clippy::all) を、警告ではなくエラーとして扱う。
 all = { level = "deny", priority = -1 }
+# 慣用的な書き方を求めるpedanticの群を有効にし、合わないものだけを下で外す。
+pedantic = { level = "warn", priority = -1 }
+# docコメントを日本語で書くため、英語の見出し (`# Errors`・`# Panics`) を求めるリントを外す。
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# 日本語の地の文に書く製品名 (SQLCipherなど) を、コードとして囲むよう求めるため外す。
+doc_markdown = "allow"
+# 値を返す関数のほとんどに `#[must_use]` を求め、捨てると困る戻り値との区別がつかなくなるため外す。
+must_use_candidate = "allow"
+# 以下は、restrictionの群から選んで足すリント。
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+mod_module_files = "warn"
+todo = "warn"
+unimplemented = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
+
+[lints.cargo]
+unused_dependencies = "warn"

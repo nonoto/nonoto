@@ -3,8 +3,6 @@
 //! 使い方: `cargo run --release -p crdt-comparison -- [--lines 行数]`
 //! 結果はMarkdownで標準出力に書き、最後に候補ごとに必須の条件を満たしたかを表にする。
 
-#![forbid(unsafe_code)]
-
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -92,6 +90,10 @@ fn ms(duration: Duration) -> String {
     format!("{:.3}ms", duration.as_secs_f64() * 1000.0)
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "表示のために小数で丸めるため、精度が落ちてよい"
+)]
 fn bytes(n: usize) -> String {
     if n >= 1024 * 1024 {
         format!("{:.2}MiB", n as f64 / 1024.0 / 1024.0)
@@ -102,6 +104,10 @@ fn bytes(n: usize) -> String {
     }
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "表示のために小数で丸めるため、精度が落ちてよい"
+)]
 fn ratio(n: usize, text: usize) -> String {
     format!("{:.2}倍", n as f64 / text as f64)
 }
@@ -178,7 +184,10 @@ fn print_reports(dataset: &Dataset, reports: &[(Report, Option<u64>)]) {
         },
     );
     row("読み込みで増えたメモリ", &|_, kib| {
-        kib.map_or_else(|| "-".to_owned(), |kib| bytes(kib as usize * 1024))
+        kib.map_or_else(
+            || "-".to_owned(),
+            |kib| bytes(usize::try_from(kib * 1024).expect("増えたメモリの量はusizeに収まる")),
+        )
     });
     row("版を指す値 (書き手2)", &|r, _| bytes(r.version_2));
     row("版を指す値 (書き手20)", &|r, _| bytes(r.version_20));

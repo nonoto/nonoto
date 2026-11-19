@@ -9,7 +9,48 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-# clippyの既定のリント (clippy::all) を、警告ではなくエラーとして扱う。
+# 2つ以上の場所で使う依存のバージョンを、ここで1か所に持つ。
+# 各クレートは `workspace = true` で引き継ぎ、フィーチャーは使うクレートの側に書く。
+[workspace.dependencies]
+gpui-kit = "=0.9.1"
+jiff = "0.2.43"
+keyring-core = "1.0.1"
+loro = "1.17.1"
+nonoto-core = { path = "crates/nonoto-core" }
+rusqlite = "0.42.0"
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+zeroize = "1.9.1"
+
 # 各クレートは `[lints] workspace = true` でこの設定を引き継ぐ。
+[workspace.lints.rust]
+# unsafeのコードは、使うモジュールでこのリントを抑えたときだけ書ける。
+unsafe_code = "deny"
+# 公開する型にDebugを実装させる (Rust API GuidelinesのC-DEBUG)。
+missing_debug_implementations = "warn"
+
 [workspace.lints.clippy]
+# clippyの既定のリント (clippy::all) を、警告ではなくエラーとして扱う。
 all = { level = "deny", priority = -1 }
+# 慣用的な書き方を求めるpedanticの群を有効にし、合わないものだけを下で外す。
+pedantic = { level = "warn", priority = -1 }
+# docコメントを日本語で書くため、英語の見出し (`# Errors`・`# Panics`) を求めるリントを外す。
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# 日本語の地の文に書く製品名 (SQLCipherなど) を、コードとして囲むよう求めるため外す。
+doc_markdown = "allow"
+# 値を返す関数のほとんどに `#[must_use]` を求め、捨てると困る戻り値との区別がつかなくなるため外す。
+must_use_candidate = "allow"
+# 以下は、restrictionの群から選んで足すリント。
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+mod_module_files = "warn"
+todo = "warn"
+unimplemented = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
+
+[workspace.lints.cargo]
+unused_dependencies = "warn"

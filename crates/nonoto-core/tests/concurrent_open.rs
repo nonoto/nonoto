@@ -6,6 +6,7 @@
 //! 毎回の `make test` では、回帰テストがこのテストのバイナリを子のプロセスとして繰り返し起動する。
 //! 回数を増やして頻度を見るときは、`make repeat-test` を使う。
 
+use std::fmt::Write as _;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -53,10 +54,11 @@ fn open_concurrently(paths: &[PathBuf], key: &Key) -> Vec<String> {
 
 /// 鍵を、鍵を渡す文に入れる小文字の16進数にする。
 fn key_hex(key: &Key) -> String {
-    key.as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    key.as_bytes().iter().fold(String::new(), |mut hex, byte| {
+        // Stringへの書き込みは失敗しない。
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
 }
 
 /// 鍵の16進数が、エラーの表示に含まれていないことを確かめる。
@@ -134,7 +136,7 @@ fn child_passed(output: &Output) -> bool {
 fn 別々のプロセスで初めてストアを同時に開いても失敗しない() {
     const TEST: &str = "プロセスで初めて別々のファイルのストアを同時に開ける";
     let runs = processes();
-    let parallel = thread::available_parallelism().map_or(1, |n| n.get());
+    let parallel = thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let mut failures = Vec::new();
     for start in (0..runs).step_by(parallel) {
         let outputs: Vec<Output> = thread::scope(|scope| {
@@ -305,8 +307,7 @@ fn プロセスで初めて鍵を渡すときのsqlcipherのログを取る() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
     let key = Key::generate().expect("鍵を作れなかった");
     let log = std::env::var_os("NONOTO_CIPHER_LOG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| dir.path().join("sqlcipher.log"));
+        .map_or_else(|| dir.path().join("sqlcipher.log"), PathBuf::from);
     let start = cipher_log_len(&log);
     let barrier = Barrier::new(threads());
 
@@ -359,8 +360,8 @@ fn プロセスで初めて鍵を渡すときのsqlcipherのログを取る() {
 
 fn message(err: &rusqlite::Error) -> String {
     match err {
-        rusqlite::Error::SqliteFailure(_, Some(msg)) => msg.clone(),
-        rusqlite::Error::SqlInputError { msg, .. } => msg.clone(),
+        rusqlite::Error::SqliteFailure(_, Some(msg))
+        | rusqlite::Error::SqlInputError { msg, .. } => msg.clone(),
         _ => String::new(),
     }
 }

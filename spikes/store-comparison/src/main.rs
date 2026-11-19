@@ -4,15 +4,15 @@
 //! ディレクトリを省略すると一時ディレクトリを使う。
 //! 結果はMarkdownで標準出力に書き、最後に変種ごとに必須の条件を満たしたかを表にする。
 
-// `unsafe` はライブラリの `fts5` だけに置き、このクレートでは許さない。
-#![deny(unsafe_code)]
-
 mod data;
 mod search;
 mod startup;
 mod verdict;
 
+use std::fmt::Write as _;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
@@ -91,14 +91,23 @@ struct Summary {
     file_kib: u64,
 }
 
-fn main() {
-    let args = Args::parse();
+fn main() -> ExitCode {
+    match run(Args::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("エラー: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(args: Args) -> io::Result<()> {
     if let Some(scheme) = args.measure_open {
         startup::run_worker(
             scheme,
             &args.path.expect("--measure-open には --path が必要"),
         );
-        return;
+        return Ok(());
     }
     let temp = tempfile_dir();
     let dir = args.dir.unwrap_or_else(|| temp.clone());
@@ -114,25 +123,28 @@ fn main() {
     println!(
         "- CPU: {}",
         std::thread::available_parallelism()
-            .map(|count| format!("{count}コア"))
-            .unwrap_or_else(|_| "不明".to_owned())
+            .map_or_else(|_| "不明".to_owned(), |count| format!("{count}コア"))
     );
 
     let key = Key::generate().expect("鍵を作れなかった");
     let base = dir.join("a-base.db");
-    let expected = prepare_base(&base, &key, &pages);
-    let mut summaries: Vec<Summary> = LOOKUPS
+    let expected = prepare_base(&base, &key, &pages)?;
+    let mut summaries = LOOKUPS
         .iter()
         .map(|lookup| measure_a(*lookup, &base, &dir, &key, &pages, &expected))
-        .collect();
-    remove_database(&base);
-    summaries.push(measure_b(&dir.join("b.db"), &key, &pages, &expected));
+        .collect::<io::Result<Vec<_>>>()?;
+    remove_database(&base)?;
+    summaries.push(measure_b(&dir.join("b.db"), &key, &pages, &expected)?);
 
     print_summary(&summaries);
 
-    if dir == temp {
-        let _ = std::fs::remove_dir_all(&temp);
+    // 計測の結果は書き終えているため、一時ディレクトリを消せなくても失敗にしない。
+    if dir == temp
+        && let Err(err) = std::fs::remove_dir_all(&temp)
+    {
+        eprintln!("一時ディレクトリを消せなかった ({}): {err}", temp.display());
     }
+    Ok(())
 }
 
 struct Args {
@@ -173,20 +185,20 @@ fn tempfile_dir() -> PathBuf {
 ///
 /// 全件の保存の時間はインデックスの有無で変わらないため、ここで1回だけ計る。
 /// クエリごとに、部分一致の走査で見つかるページを返す。各変種の結果はこれと比べる。
-fn prepare_base(path: &Path, key: &Key, pages: &[Page]) -> Vec<Vec<PageId>> {
+fn prepare_base(path: &Path, key: &Key, pages: &[Page]) -> io::Result<Vec<Vec<PageId>>> {
     println!("\n## 方式A: データベース全体を暗号化する (SQLCipher)");
-    remove_database(path);
+    remove_database(path)?;
     let mut store = SqlCipherStore::open(path, key).expect("方式Aのストアを開けなかった");
     let elapsed = time(|| insert_all(&mut store, pages));
     report("全件の保存 (1件ずつ、インデックス無し)", elapsed);
     drop(store);
     let conn = open_sqlcipher(path, key);
-    QUERIES
+    Ok(QUERIES
         .iter()
         .map(|query| {
             ids(search::scan(&conn, query.text).expect("方式Aを部分一致で検索できなかった"))
         })
-        .collect()
+        .collect())
 }
 
 fn measure_a(
@@ -196,10 +208,10 @@ fn measure_a(
     key: &Key,
     pages: &[Page],
     expected: &[Vec<PageId>],
-) -> Summary {
+) -> io::Result<Summary> {
     println!("\n## {}", lookup.label());
     let path = dir.join(lookup.file_name());
-    remove_database(&path);
+    remove_database(&path)?;
     std::fs::copy(base, &path).expect("方式Aのデータベースを複製できなかった");
 
     let conn = open_sqlcipher(&path, key);
@@ -208,7 +220,7 @@ fn measure_a(
         Lookup::Fts(index) => {
             let size_before = database_size(&path);
             let build = time(|| {
-                search::build_fts(&conn, index).expect("全文検索のインデックスを作れなかった")
+                search::build_fts(&conn, index).expect("全文検索のインデックスを作れなかった");
             });
             report("全文検索のインデックスの作成", build);
             let kib = (database_size(&path) - size_before) / 1024;
@@ -233,19 +245,24 @@ fn measure_a(
     let writes = measure_single_ops(&mut store, pages, condition);
     drop(store);
 
-    summarize(
+    Ok(summarize(
         lookup.label(),
         lookup.indexes_two_chars(),
-        searches,
-        startup,
+        &searches,
+        &startup,
         writes,
         (index_build, index_kib, file_kib),
-    )
+    ))
 }
 
-fn measure_b(path: &Path, key: &Key, pages: &[Page], expected: &[Vec<PageId>]) -> Summary {
+fn measure_b(
+    path: &Path,
+    key: &Key,
+    pages: &[Page],
+    expected: &[Vec<PageId>],
+) -> io::Result<Summary> {
     println!("\n## 方式B: レコード単位で暗号化する (SQLite + XChaCha20-Poly1305)");
-    remove_database(path);
+    remove_database(path)?;
 
     let mut store = RecordStore::open(path, key).expect("方式Bのストアを開けなかった");
     let elapsed = time(|| insert_all(&mut store, pages));
@@ -265,14 +282,14 @@ fn measure_b(path: &Path, key: &Key, pages: &[Page], expected: &[Vec<PageId>]) -
     let writes = measure_single_ops(&mut store, pages, "メモリ上のインデックスを保つ");
     drop(store);
 
-    summarize(
+    Ok(summarize(
         "方式B",
         true,
-        searches,
-        startup,
+        &searches,
+        &startup,
         writes,
         (None, None, file_kib),
-    )
+    ))
 }
 
 /// クエリごとの検索の時間 (中央値) を計る。結果が部分一致の走査と違えば止める。
@@ -308,20 +325,20 @@ fn measure_searches(
 fn summarize(
     label: &'static str,
     indexes_two_chars: bool,
-    searches: Vec<Duration>,
-    startup: startup::Measurement,
+    searches: &[Duration],
+    startup: &startup::Measurement,
     (insert, update): (Duration, Option<Duration>),
     (index_build, index_kib, file_kib): (Option<Duration>, Option<u64>, u64),
 ) -> Summary {
     let required_searches: Vec<Duration> = QUERIES
         .iter()
-        .zip(&searches)
+        .zip(searches)
         .filter(|(query, _)| query.required)
         .map(|(_, elapsed)| *elapsed)
         .collect();
     let single_char_search = QUERIES
         .iter()
-        .zip(&searches)
+        .zip(searches)
         .find(|(query, _)| query.text.chars().count() == 1)
         .map(|(_, elapsed)| *elapsed)
         .expect("1文字のクエリが無い");
@@ -443,7 +460,7 @@ fn measure_single_ops(
             store.insert(page).expect("ページを保存できなかった");
         }
     });
-    let insert = elapsed / SINGLE_OPS as u32;
+    let insert = elapsed / u32::try_from(SINGLE_OPS).expect("計る件数はu32に収まる");
     report(&format!("1件の保存 (平均、{condition})"), insert);
 
     let updates = measure_updates(store, pages);
@@ -494,12 +511,11 @@ fn measure_updates(store: &mut impl Writes, pages: &[Page]) -> OperationMeasurem
 /// 方式Aのデータベースを開いて鍵を渡し、全文検索のトークナイザーを登録する。
 fn open_sqlcipher(path: &Path, key: &Key) -> Connection {
     let conn = Connection::open(path).expect("方式Aのデータベースを開けなかった");
-    let hex = Zeroizing::new(
-        key.as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>(),
-    );
+    let hex = Zeroizing::new(key.as_bytes().iter().fold(String::new(), |mut hex, byte| {
+        // Stringへの書き込みは失敗しない。
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    }));
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", hex.as_str()));
     conn.execute_batch(&statement)
         .expect("方式Aのデータベースに鍵を渡せなかった");
@@ -544,10 +560,25 @@ fn database_size(path: &Path) -> u64 {
         .sum()
 }
 
-fn remove_database(path: &Path) {
+fn remove_database(path: &Path) -> io::Result<()> {
     for file in database_files(path) {
-        let _ = std::fs::remove_file(file);
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            // 初めての計測ではファイルが無く、WAL・ジャーナル・SHMはジャーナルの設定によっては作られない。
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            // 前の計測のファイルが残ると、次の計測がそれを読んで結果が変わるため、計測を止める。
+            Err(err) => {
+                return Err(io::Error::new(
+                    err.kind(),
+                    format!(
+                        "前の計測のデータベースを消せなかった ({}): {err}",
+                        file.display()
+                    ),
+                ));
+            }
+        }
     }
+    Ok(())
 }
 
 fn report_startup(scheme: Scheme, path: &Path, key: &Key, label: &str) -> startup::Measurement {
@@ -626,18 +657,19 @@ mod tests {
                 )
                 .expect("更新したページを数えられなかった");
             assert_eq!(
-                changed as usize,
+                usize::try_from(changed).expect("件数は0以上"),
                 page_count.min(SINGLE_OPS),
                 "更新した件数が違う"
             );
             assert_eq!(
-                measured.count as usize, changed as usize,
+                measured.count,
+                u32::try_from(changed).expect("件数はu32に収まる"),
                 "計測した件数と更新した件数が違う"
             );
             let expected = if changed == 0 {
                 None
             } else {
-                Some(measured.elapsed / changed as u32)
+                Some(measured.elapsed / u32::try_from(changed).expect("件数はu32に収まる"))
             };
             assert_eq!(
                 measured.average(),
@@ -660,7 +692,7 @@ mod tests {
             .query_row("SELECT count(*) FROM pages", [], |row| row.get(0))
             .expect("ページを数えられなかった");
         assert_eq!(
-            count as usize,
+            usize::try_from(count).expect("件数は0以上"),
             pages.len() + SINGLE_OPS,
             "保存したページの件数が違う"
         );

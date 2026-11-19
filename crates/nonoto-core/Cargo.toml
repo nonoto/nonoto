@@ -7,26 +7,26 @@ publish.workspace = true
 [dependencies]
 dirs = "7.0.0"
 getrandom = "0.4.3"
-jiff = "0.2.43"
+jiff.workspace = true
 # ページの本文をCRDTで持つ文書 (`document`) に使う。
-loro = "1.17.1"
+loro.workspace = true
 pulldown-cmark = { version = "0.13.6", default-features = false }
-rusqlite = { version = "0.42.0", features = ["bundled-sqlcipher-vendored-openssl"] }
-thiserror = "2.0.21"
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+thiserror.workspace = true
 uuid = { version = "1.29.2", features = ["v7"] }
-zeroize = { version = "1.9.1", features = ["zeroize_derive"] }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
-keyring-core = "1.0.1"
+keyring-core.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring-core = "1.0.1"
+keyring-core.workspace = true
 windows-native-keyring-store = "1.1.0"
 
 [dev-dependencies]
-keyring-core = "1.0.1"
-tempfile = "3.27.0"
+keyring-core.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use yrs::types::Delta;
@@ -22,9 +23,16 @@ const OBSERVER_KEY: &str = "crdt-comparison";
 ///
 /// 位置は `OffsetKind::Bytes` (UTF-8のバイト数) で数える。
 /// 版の本文を取り出せるよう、削除した文字を消さない設定 (`skip_gc`) で作る。
+/// デバッグ表示では本文を伏せる。
 pub struct YrsReplica {
     doc: Doc,
     text: TextRef,
+}
+
+impl fmt::Debug for YrsReplica {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("YrsReplica").finish_non_exhaustive()
+    }
 }
 
 fn options(client_id: Option<ClientID>, skip_gc: bool) -> Options {

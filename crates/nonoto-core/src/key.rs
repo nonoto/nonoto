@@ -58,6 +58,7 @@ pub trait KeyStore {
 ///
 /// OSのキーチェーンを使えない開発コンテナとテストで使う。
 /// ファイルは持ち主だけが読み書きできるようにする。
+#[derive(Debug)]
 pub struct FileKeyStore {
     path: PathBuf,
 }

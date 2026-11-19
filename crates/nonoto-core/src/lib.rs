@@ -2,6 +2,7 @@
 //!
 //! 各OSのクライアントとサーバーから共有するため、UIとCLIのクレートには依存しない。
 
+mod clock;
 mod document;
 mod editing;
 mod error;
@@ -15,6 +16,7 @@ mod wikilink;
 
 use std::path::{Path, PathBuf};
 
+pub use clock::{Clock, SystemClock};
 pub use document::{Affinity, Document, Replacement, Snapshot, Update, map_position};
 pub use editing::{TextEdit, continue_list, indent, outdent};
 pub use error::{Error, OpenStage};
@@ -57,11 +59,23 @@ impl Default for KeyStorage {
 /// 置き場のディレクトリが無ければ作る。
 /// 鍵は `key_storage` の保管場所から読み、無ければ作る。
 /// 鍵の取得は、データベースのトランザクションの外 (開く前) で行う。
+/// 日時はシステムの時計で決める。
 pub fn open(data_dir: &Path, key_storage: KeyStorage) -> Result<Pages<SqlCipherStore>, Error> {
+    open_with_clock(data_dir, key_storage, SystemClock)
+}
+
+/// データの置き場にあるページを、渡した時計で日時を決めるように開く。
+///
+/// 置き場と鍵の扱いは [`open`] と同じ。
+pub fn open_with_clock(
+    data_dir: &Path,
+    key_storage: KeyStorage,
+    clock: impl Clock + Send + 'static,
+) -> Result<Pages<SqlCipherStore>, Error> {
     std::fs::create_dir_all(data_dir).map_err(Error::Io)?;
     let key = key_store(data_dir, key_storage)?.load_or_create()?;
     let store = SqlCipherStore::open(&data_dir.join(DATABASE_FILE), &key)?;
-    Ok(Pages::new(store))
+    Ok(Pages::with_clock(store, clock))
 }
 
 fn key_store(data_dir: &Path, key_storage: KeyStorage) -> Result<Box<dyn KeyStore>, Error> {

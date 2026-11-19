@@ -1,6 +1,7 @@
+mod initialize;
+
 use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::OnceLock;
 
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter};
@@ -10,11 +11,13 @@ use super::PageStore;
 use crate::error::{Error, OpenStage};
 use crate::key::Key;
 use crate::page::{Page, PageId, PageSummary, PageUpdate};
+use initialize::initialize;
 
 /// スキーマの版。`PRAGMA user_version` に書く。
 const SCHEMA_VERSION: i64 = 1;
 
 /// データベース全体をSQLCipherで暗号化するストア。
+#[derive(Debug)]
 pub struct SqlCipherStore {
     conn: Connection,
 }
@@ -31,29 +34,6 @@ impl SqlCipherStore {
         migrate(&mut conn).map_err(|err| open_error(OpenStage::Migrate, err))?;
         Ok(Self { conn })
     }
-}
-
-/// SQLiteとSQLCipherのプロセスの初期化を、1つのスレッドで済ませる。
-///
-/// SQLiteの `sqlite3_initialize` は、SQLCipherの初期化を終える前に初期化済みの印を立てる。
-/// その間に別のスレッドが接続を開くと、SQLCipherが初期化されていない接続に鍵を渡すことになり、`PRAGMA key` が失敗する。
-/// 鍵を渡す接続を開く前に、ここで初期化を最後まで済ませ、他のスレッドは済むまで待たせる。
-/// 待たせられるのはこの関数を通るスレッドだけなので、プロセスの中の接続は、テストのものも含めてすべてこの関数の後に開く。
-/// 失敗した場合も結果を保持する。SQLCipherだけが初期化されていない状態で、次の呼び出しが成功を返すことがあるためである。
-fn initialize() -> rusqlite::Result<()> {
-    static RESULT: OnceLock<i32> = OnceLock::new();
-    let code = *RESULT.get_or_init(|| {
-        // sqlite3_initializeはスレッドセーフで、OnceLockが1回にまとめて完了まで待つ。
-        // rusqliteの暗黙の初期化は失敗を読み捨てる経路があるため、その前に戻り値を直接受け取る。
-        unsafe { rusqlite::ffi::sqlite3_initialize() }
-    });
-    if code != rusqlite::ffi::SQLITE_OK {
-        return Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(code),
-            None,
-        ));
-    }
-    Ok(())
 }
 
 fn connect(path: &Path) -> rusqlite::Result<Connection> {
@@ -746,10 +726,11 @@ mod tests {
 
     /// 鍵を、`apply_key` が鍵を渡す文に入れるのと同じ小文字の16進数にする。
     fn key_hex(key: &Key) -> String {
-        key.as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        key.as_bytes().iter().fold(String::new(), |mut hex, byte| {
+            // Stringへの書き込みは失敗しない。
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
     }
 
     /// エラーと、その原因の連鎖の表示 (`Display` と `Debug`) をつなげる。
@@ -757,7 +738,8 @@ mod tests {
         let mut text = format!("{err} {err:?}");
         let mut source = std::error::Error::source(err);
         while let Some(cause) = source {
-            text.push_str(&format!(" {cause} {cause:?}"));
+            // Stringへの書き込みは失敗しない。
+            let _ = write!(text, " {cause} {cause:?}");
             source = cause.source();
         }
         text

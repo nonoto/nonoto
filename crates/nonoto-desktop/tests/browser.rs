@@ -8,12 +8,14 @@ use nonoto_desktop::PageBrowser;
 use tempfile::TempDir;
 
 mod common;
-use common::FailingStore;
+use common::{FailingStore, SteppingClock};
 
 /// 一時ディレクトリにページを作り、作成した順と逆 (更新した日時の新しい順) で一覧に並ぶようにする。
 fn pages_with(titles_and_bodies: &[(&str, &str)]) -> (TempDir, Pages<SqlCipherStore>) {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
-    let mut pages = nonoto_core::open(dir.path(), KeyStorage::File).expect("ページを開けなかった");
+    let mut pages =
+        nonoto_core::open_with_clock(dir.path(), KeyStorage::File, SteppingClock::new())
+            .expect("ページを開けなかった");
     for (title, body) in titles_and_bodies {
         pages
             .create(NewPage {
@@ -21,8 +23,6 @@ fn pages_with(titles_and_bodies: &[(&str, &str)]) -> (TempDir, Pages<SqlCipherSt
                 body: (*body).to_owned(),
             })
             .expect("ページを作成できなかった");
-        // 一覧の並びを決めるため、更新日時 (ミリ秒) をずらす。
-        std::thread::sleep(std::time::Duration::from_millis(2));
     }
     (dir, pages)
 }

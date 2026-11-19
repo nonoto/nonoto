@@ -36,7 +36,7 @@ fn run_with_stdin(data_dir: &Path, args: &[&str], stdin: &str) -> Output {
 }
 
 /// 成功したことを確かめ、標準出力のJSONを返す。
-fn json(output: Output) -> Value {
+fn json(output: &Output) -> Value {
     assert!(
         output.status.success(),
         "終了コードが成功ではない: {:?}, 標準エラー: {}",
@@ -47,7 +47,10 @@ fn json(output: Output) -> Value {
 }
 
 fn create(data_dir: &Path, title: &str, body: &str) -> Value {
-    json(run(data_dir, &["create", "--title", title, "--body", body]))
+    json(&run(
+        data_dir,
+        &["create", "--title", title, "--body", body],
+    ))
 }
 
 #[test]
@@ -71,7 +74,7 @@ fn 初めての置き場で複数のプロセスから同時にページを作�
             .collect::<Vec<_>>()
     });
 
-    let list = json(run(dir.path(), &["list"]));
+    let list = json(&run(dir.path(), &["list"]));
     assert_eq!(
         list.as_array().expect("一覧が配列ではない").len(),
         created.len(),
@@ -80,7 +83,7 @@ fn 初めての置き場で複数のプロセスから同時にページを作�
     for page in created {
         let id = page["id"].as_str().expect("IDが文字列ではない");
         assert_eq!(
-            json(run(dir.path(), &["get", id])),
+            json(&run(dir.path(), &["get", id])),
             page,
             "同時に作成したページを別のプロセスから読めない"
         );
@@ -93,7 +96,7 @@ fn 作成したページを取得できる() {
 
     let created = create(dir.path(), "はじめに", "# 見出し\n\n本文");
     let id = created["id"].as_str().expect("IDが文字列ではない");
-    let got = json(run(dir.path(), &["get", id]));
+    let got = json(&run(dir.path(), &["get", id]));
 
     assert_eq!(got, created, "取得したページが作成したページと異なる");
     assert_eq!(got["title"], "はじめに", "タイトルが期待と異なる");
@@ -106,12 +109,12 @@ fn 一覧は本文を含めず_更新した日時の新しい順に並ぶ() {
     let first = create(dir.path(), "1つめ", "本文");
     create(dir.path(), "2つめ", "本文");
     let first_id = first["id"].as_str().expect("IDが文字列ではない");
-    json(run(
+    json(&run(
         dir.path(),
         &["update", first_id, "--title", "1つめ (更新)"],
     ));
 
-    let list = json(run(dir.path(), &["list"]));
+    let list = json(&run(dir.path(), &["list"]));
 
     let items = list.as_array().expect("一覧が配列ではない");
     let titles: Vec<&str> = items
@@ -135,7 +138,7 @@ fn 更新で指定しなかった項目は残る() {
     let created = create(dir.path(), "タイトル", "本文");
     let id = created["id"].as_str().expect("IDが文字列ではない");
 
-    let updated = json(run_with_stdin(
+    let updated = json(&run_with_stdin(
         dir.path(),
         &["update", id, "--body-file", "-"],
         "標準入力の\n本文\n",
@@ -162,7 +165,7 @@ fn 本文をファイルから読んで作成できる() {
     let body_path = body_dir.path().join("body.md");
     std::fs::write(&body_path, "# ファイルの\n\n本文\n").expect("本文のファイルを書けなかった");
 
-    let created = json(run(
+    let created = json(&run(
         dir.path(),
         &[
             "create",
@@ -244,7 +247,7 @@ fn 環境変数でデータの置き場を指定できる() {
         .output()
         .expect("コマンド nonoto を実行できなかった");
 
-    assert_eq!(json(output), created, "環境変数の置き場のページを読めない");
+    assert_eq!(json(&output), created, "環境変数の置き場のページを読めない");
 }
 
 #[test]
@@ -253,7 +256,7 @@ fn データの置き場ごとに別のページを持つ() {
     let second = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
     create(first.path(), "1つめの置き場のページ", "本文");
 
-    let list = json(run(second.path(), &["list"]));
+    let list = json(&run(second.path(), &["list"]));
 
     assert_eq!(list, Value::Array(vec![]), "別の置き場のページが見えた");
 }

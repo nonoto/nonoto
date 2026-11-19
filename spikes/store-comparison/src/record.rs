@@ -4,6 +4,7 @@
 //! 暗号文の形式 (版・ノンス・暗号文) は、同期でサーバーへ送る形式と共有することを想定している。
 
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 
 use chacha20poly1305::aead::{Aead, Generate, KeyInit, Payload};
@@ -26,6 +27,16 @@ pub struct RecordStore {
     cipher: XChaCha20Poly1305,
     pages: HashMap<PageId, Page>,
     index: BigramIndex,
+}
+
+/// 鍵を持つ暗号と、復号したページの本文を出さない。
+impl fmt::Debug for RecordStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecordStore")
+            .field("conn", &self.conn)
+            .field("pages", &self.pages.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl RecordStore {
@@ -278,6 +289,8 @@ fn timestamp(millisecond: i64) -> Result<Timestamp, Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     fn page(title: &str, body: &str, millisecond: i64) -> Page {
@@ -293,6 +306,32 @@ mod tests {
 
     fn titles(summaries: Vec<PageSummary>) -> Vec<String> {
         summaries.into_iter().map(|summary| summary.title).collect()
+    }
+
+    #[test]
+    fn ストアをデバッグ表示しても鍵とページの内容を出さない() {
+        let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
+        let key = Key::generate().expect("鍵を作れなかった");
+        let mut store =
+            RecordStore::open(&dir.path().join("records.db"), &key).expect("ストアを開けなかった");
+        store
+            .insert(&page("伏せるタイトル", "伏せる本文", 1_000))
+            .expect("ページを保存できなかった");
+
+        let debug = format!("{store:?}").to_lowercase();
+        let key_hex = key.as_bytes().iter().fold(String::new(), |mut hex, byte| {
+            // Stringへの書き込みは失敗しない。
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+        assert!(
+            !debug.contains(&key_hex),
+            "ストアのデバッグ表示に鍵が含まれている"
+        );
+        assert!(
+            !debug.contains("伏せるタイトル") && !debug.contains("伏せる本文"),
+            "ストアのデバッグ表示にページの内容が含まれている"
+        );
     }
 
     #[test]

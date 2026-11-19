@@ -3,13 +3,24 @@
 //! 日本語には単語の区切りが無いため、連続する2文字 (バイグラム) ごとにページを引けるようにする。
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use nonoto_core::PageId;
 
 /// バイグラムからページを引く転置インデックス。
+///
+/// デバッグ表示では文字の組の件数だけを表示する。
 #[derive(Default)]
 pub struct BigramIndex {
     postings: HashMap<(char, char), HashSet<PageId>>,
+}
+
+impl fmt::Debug for BigramIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BigramIndex")
+            .field("bigram_count", &self.postings.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl BigramIndex {
@@ -60,6 +71,23 @@ fn bigrams(text: &str) -> impl Iterator<Item = (char, char)> + '_ {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 索引をデバッグ表示しても登録した文字とページidを出さない() {
+        let mut index = BigramIndex::default();
+        let id = PageId::new();
+        index.add(id, &["伏字"]);
+
+        let debug = format!("{index:?}");
+        assert!(
+            !debug.contains('伏') && !debug.contains('字'),
+            "索引のデバッグ表示に登録した文字が含まれている"
+        );
+        assert!(
+            !debug.contains(&id.to_string()),
+            "索引のデバッグ表示にページIDが含まれている"
+        );
+    }
 
     #[test]
     fn すべてのバイグラムを含むページだけが候補になる() {

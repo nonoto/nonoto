@@ -31,17 +31,23 @@ fn main() -> ExitCode {
             }),
             ..Default::default()
         };
-        gpui_kit::open_window(options, cx, |window, cx| {
+        let opened = gpui_kit::open_window(options, cx, |window, cx| {
             // ライトとダークを、システムの外観に合わせて切り替える。
             Theme::sync_system_appearance(Some(window), cx);
             window
                 .observe_window_appearance(|window, cx| {
-                    Theme::sync_system_appearance(Some(window), cx)
+                    Theme::sync_system_appearance(Some(window), cx);
                 })
                 .detach();
             cx.new(|cx| PageBrowser::new(pages, window, cx))
-        })
-        .expect("ウィンドウを開けなかった");
+        });
+        if let Err(err) = opened {
+            eprintln!("エラー: ウィンドウを開けなかった: {err:#}");
+            // macOSではアプリを終了するとプロセスが成功の終了コードで終わり、runから戻らない。
+            // 失敗の終了コードで終わるよう、ここでプロセスを終える。
+            // ストアは、ウィンドウの中身を作るクロージャーとともに、open_windowの中で既に閉じている。
+            std::process::exit(1);
+        }
         cx.on_window_closed(|cx, _| cx.quit()).detach();
         cx.activate(true);
     });

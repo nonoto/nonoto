@@ -125,7 +125,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         None => nonoto_core::default_data_dir()
             .ok_or("データの置き場が決まらない。--data-dir か NONOTO_DATA_DIR で指定する")?,
     };
-    let key_storage = cli.key_store.map(Into::into).unwrap_or_default();
+    let key_storage = cli.key_store.map_or_default(Into::into);
     let mut pages = nonoto_core::open(&data_dir, key_storage)?;
 
     match cli.command {

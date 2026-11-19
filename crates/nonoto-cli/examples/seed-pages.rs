@@ -29,7 +29,7 @@ enum KeyStoreArg {
 }
 
 fn main() -> ExitCode {
-    match seed(Args::parse()) {
+    match seed(&Args::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("エラー: {error}");
@@ -38,7 +38,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn seed(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+fn seed(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let key_storage = match args.key_store {
         Some(KeyStoreArg::Keychain) => KeyStorage::Keychain,
         Some(KeyStoreArg::File) => KeyStorage::File,

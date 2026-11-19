@@ -32,16 +32,18 @@ pub struct Timing {
 impl Timing {
     fn from_samples(mut samples: Vec<Duration>) -> Self {
         samples.sort_unstable();
-        let at = |q: f64| samples[((samples.len() - 1) as f64 * q).round() as usize];
+        // 百分位の位置を、整数で四捨五入して求める。
+        let at = |percent: usize| samples[((samples.len() - 1) * percent + 50) / 100];
         Self {
-            median: at(0.5),
-            p99: at(0.99),
+            median: at(50),
+            p99: at(99),
             max: samples[samples.len() - 1],
         }
     }
 }
 
 /// 1つの候補の計測の結果。
+#[derive(Debug)]
 pub struct Report {
     pub name: &'static str,
     /// 入力の列を当てて文書を作るまでの時間。
@@ -247,7 +249,8 @@ mod tests {
         }
 
         let dropped = Cell::new(false);
-        let (loaded, text, _) = timed_load(|| Ok(Loaded(&dropped)), |_| "本文".to_owned()).unwrap();
+        let (loaded, text, _) = timed_load(|| Ok(Loaded(&dropped)), |_| "本文".to_owned())
+            .expect("読み込みを計れなかった");
         assert_eq!(text, "本文");
         assert!(!dropped.get(), "計測を終えて返す前に文書を破棄した");
         drop(loaded);

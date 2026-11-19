@@ -3,8 +3,10 @@
 //! `rusqlite` にはトークナイザーを登録するAPIが無いため、`SELECT fts5(?1)` で `fts5_api` のポインタを受け取り、
 //! `xCreateTokenizer` を呼ぶ。このクレートの `unsafe` は、このモジュールだけに置く。
 
-#![allow(unsafe_code)]
-#![warn(clippy::undocumented_unsafe_blocks)]
+#![expect(
+    unsafe_code,
+    reason = "rusqliteにはFTS5のトークナイザーを登録するAPIが無いため、SQLiteのCのAPIを直接呼ぶ"
+)]
 
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -41,7 +43,7 @@ pub fn register(conn: &Connection) -> rusqlite::Result<()> {
                 api,
                 name.as_ptr(),
                 ptr::from_ref(tokenizer).cast_mut().cast(),
-                &mut methods,
+                &raw mut methods,
                 None,
             )
         };

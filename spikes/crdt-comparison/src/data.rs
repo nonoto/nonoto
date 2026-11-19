@@ -3,6 +3,8 @@
 //! 入力の列は、固定した種の乱数で作り、実行のたびに同じ内容になる。
 //! 1文字ずつの入力・IMEの確定に当たる数文字の挿入・打ち直しの削除・貼り付けに当たる大きな挿入を混ぜる。
 
+use std::fmt;
+
 use crate::rng::SeededRng;
 
 /// 本文への編集の1件。位置と長さは、UTF-8のバイト数で数える。
@@ -13,9 +15,20 @@ pub enum Edit {
 }
 
 /// 入力の列と、それを当てたあとの本文。
+///
+/// デバッグ表示では本文を伏せ、入力の件数と本文の長さを表示する。
 pub struct Dataset {
     pub edits: Vec<Edit>,
     pub text: String,
+}
+
+impl fmt::Debug for Dataset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Dataset")
+            .field("edits", &self.edits.len())
+            .field("text_bytes", &self.text.len())
+            .finish()
+    }
 }
 
 impl Dataset {

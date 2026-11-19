@@ -1,3 +1,5 @@
+use std::fmt;
+
 use automerge::{
     ActorId, AutoCommit, ChangeHash, LoadOptions, ObjId, ObjType, PatchAction, ROOT, ReadDoc,
     TextEncoding, transaction::Transactable,
@@ -19,9 +21,16 @@ const HASH_LEN: usize = 32;
 /// Automergeの文書の複製。
 ///
 /// 位置は `TextEncoding::Utf8CodeUnit` (UTF-8のバイト数) で数える。
+/// デバッグ表示では本文を伏せる。
 pub struct AutomergeReplica {
     doc: AutoCommit,
     text: ObjId,
+}
+
+impl fmt::Debug for AutomergeReplica {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AutomergeReplica").finish_non_exhaustive()
+    }
 }
 
 impl AutomergeReplica {
@@ -75,9 +84,8 @@ impl Replica for AutomergeReplica {
         let doc =
             AutoCommit::load_with_options(snapshot, LoadOptions::new().text_encoding(ENCODING))
                 .map_err(|_| ReplicaError::Load(NAME))?;
-        let text = match doc.get(ROOT, TEXT_KEY) {
-            Ok(Some((_, id))) => id,
-            _ => return Err(ReplicaError::Load(NAME)),
+        let Ok(Some((_, text))) = doc.get(ROOT, TEXT_KEY) else {
+            return Err(ReplicaError::Load(NAME));
         };
         Ok(Self { doc, text })
     }

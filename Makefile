@@ -15,9 +15,11 @@ fmt-check:
 	cargo fmt --manifest-path $(SQLITE3MC_CRATE)/Cargo.toml --check
 
 .PHONY: lint
+# `build.warnings` で、ローカルのパッケージに対するrustc・clippy・Cargoのリントの警告をエラーにする。
+# 作業中のビルドやテストを警告で止めないよう、リントのコマンドとCIのclippyに設定を渡す。
 lint: fetch-sqlite3mc
-	cargo clippy --workspace --all-targets --locked -- -D warnings
-	cd $(SQLITE3MC_CRATE) && cargo clippy --all-targets --locked -- -D warnings
+	cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
+	cd $(SQLITE3MC_CRATE) && cargo clippy --all-targets --locked --config 'build.warnings="deny"'
 
 .PHONY: test
 test: fetch-sqlite3mc

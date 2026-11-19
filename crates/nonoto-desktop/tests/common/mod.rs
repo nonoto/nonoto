@@ -1,7 +1,40 @@
 //! 画面のテストで共通に使うもの。
 
-use jiff::Timestamp;
-use nonoto_core::{Error, Page, PageId, PageStore, PageSummary, PageUpdate, Pages, SqlCipherStore};
+use std::cell::Cell;
+
+use jiff::{SignedDuration, Timestamp};
+use nonoto_core::{
+    Clock, Error, Page, PageId, PageStore, PageSummary, PageUpdate, Pages, SqlCipherStore,
+};
+
+/// 呼ぶたびに1秒ずつ進んだ日時を返す時計。あとに作ったページほど、更新した日時が新しくなる。
+#[derive(Debug)]
+pub struct SteppingClock {
+    next: Cell<Timestamp>,
+}
+
+impl SteppingClock {
+    pub fn new() -> Self {
+        Self {
+            next: Cell::new(
+                "2026-01-01T00:00:00Z"
+                    .parse()
+                    .expect("始まりの日時を読めなかった"),
+            ),
+        }
+    }
+}
+
+impl Clock for SteppingClock {
+    fn now(&self) -> Timestamp {
+        let now = self.next.get();
+        self.next.set(
+            now.checked_add(SignedDuration::from_secs(1))
+                .expect("1秒進めた日時が表せる範囲にある"),
+        );
+        now
+    }
+}
 
 /// 読み込みや書き込みに失敗するストア。失敗したときの画面の表示と挙動を確かめる。
 ///
