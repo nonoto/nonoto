@@ -64,6 +64,8 @@ Until that version is 3 days old, running `cargo update` without naming a crate 
 If Cargo cannot find such a version, dependency resolution fails.
 During that time, name the crate when upgrading other dependencies: `cargo update <crate>`.
 
+Dependencies used in two or more places keep their versions in `[workspace.dependencies]` in the workspace `Cargo.toml`.
+
 ## Repeating tests
 
 For rare failures, `make repeat-test` repeats a test, one process per run, to measure how often it fails.

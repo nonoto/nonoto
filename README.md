@@ -60,6 +60,8 @@ CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update <クレート> --prec
 その条件を満たす版が見つからなければ、依存の解決が失敗します。
 そのあいだにほかの依存を上げるときは、`cargo update <クレート>` でクレートを指定します。
 
+2つ以上の場所で使う依存は、ワークスペースの `Cargo.toml` の `[workspace.dependencies]` でバージョンを持ちます。
+
 ## テストを繰り返して確かめる
 
 まれにしか起きない失敗は、`make repeat-test` でテストをプロセスごと繰り返して頻度を見ます。
