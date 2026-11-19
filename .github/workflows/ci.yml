@@ -80,9 +80,12 @@ jobs:
         with:
           key: ${{ matrix.target }}
       # make lint は開発環境のOS向けにだけ検査するため、OSごとに分けたコードと依存を持つコアは、各OS向けにも検査する。
+      # WindowsではGit Bashのperlが同梱のOpenSSLの設定に使うモジュールを持たないため、既定のシェルで動かす。
+      # シェルごとに引用符の扱いが変わらないよう、警告をエラーにする設定は環境変数で渡す。
       - name: コアをclippyで検査する
-        shell: bash
-        run: cargo clippy -p nonoto-core --all-targets --target ${{ matrix.target }} --locked --config 'build.warnings="deny"'
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy -p nonoto-core --all-targets --target ${{ matrix.target }} --locked
       - run: cargo build -p nonoto-core --target ${{ matrix.target }} --locked
       # 全文検索のトークナイザーをCのAPIで登録するコードも、各OS向けにビルドできることを確かめる。
       - run: cargo build -p store-comparison --target ${{ matrix.target }} --locked
