@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-16 -->
+<!-- last_synced: 2026-11-18 -->
 
 # Nonoto
 
@@ -47,6 +47,22 @@ The `nonoto` command and the desktop app share environment variables for the dat
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `NONOTO_DATA_DIR`  | Data location. Defaults to the OS convention (`~/Library/Application Support/nonoto` on macOS)             |
 | `NONOTO_KEY_STORE` | Key storage (`keychain` or `file`). Defaults to the keychain on macOS and Windows, and to a file elsewhere |
+
+## Adding and upgrading dependencies
+
+`cargo add` and `cargo update` do not select versions published less than 3 days ago (`global-min-publish-age` in `.cargo/config.toml`).
+Versions already in `Cargo.lock` are still used for builds, even if they are less than 3 days old.
+
+To use a newer version on purpose, such as a security fix, upgrade one crate at a time.
+If the version you want does not satisfy the requirement in `Cargo.toml`, update that requirement first.
+
+```sh
+CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update <crate> --precise <version>
+```
+
+Until that version is 3 days old, running `cargo update` without naming a crate can downgrade the dependency to a version that satisfies the requirement and is at least 3 days old.
+If Cargo cannot find such a version, dependency resolution fails.
+During that time, name the crate when upgrading other dependencies: `cargo update <crate>`.
 
 ## Repeating tests
 
