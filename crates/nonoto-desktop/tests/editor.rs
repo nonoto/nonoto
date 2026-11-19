@@ -15,7 +15,7 @@ use nonoto_desktop::PageBrowser;
 use tempfile::TempDir;
 
 mod common;
-use common::FailingStore;
+use common::{FailingStore, SteppingClock};
 
 type Browser = PageBrowser<SqlCipherStore>;
 
@@ -29,11 +29,12 @@ fn secondary(key: &str) -> String {
 }
 
 fn open_pages(dir: &Path) -> Pages<SqlCipherStore> {
-    nonoto_core::open(dir, KeyStorage::File).expect("ページを開けなかった")
+    nonoto_core::open_with_clock(dir, KeyStorage::File, SteppingClock::new())
+        .expect("ページを開けなかった")
 }
 
-/// 一時ディレクトリにページを作る。あとに作ったページほど一覧の上に並ぶ。
-fn data_with(titles_and_bodies: &[(&str, &str)]) -> TempDir {
+/// 一時ディレクトリにページを作り、作成に使った時計を持つPagesを返す。
+fn data_with(titles_and_bodies: &[(&str, &str)]) -> (TempDir, Pages<SqlCipherStore>) {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
     let mut pages = open_pages(dir.path());
     for (title, body) in titles_and_bodies {
@@ -43,10 +44,8 @@ fn data_with(titles_and_bodies: &[(&str, &str)]) -> TempDir {
                 body: (*body).to_owned(),
             })
             .expect("ページを作成できなかった");
-        // 一覧の並びを決めるため、更新日時 (ミリ秒) をずらす。
-        std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    dir
+    (dir, pages)
 }
 
 /// 画面を閉じたあとの保存の結果を、別に開いたストアから読む。
@@ -60,16 +59,15 @@ fn stored_pages(dir: &Path) -> Vec<Page> {
         .collect()
 }
 
-fn open_browser(cx: &mut TestAppContext, dir: &Path) -> (WindowHandle<Root>, Entity<Browser>) {
-    open_browser_with(cx, open_pages(dir))
-}
-
 /// 保存に失敗するストアで画面を開く。
 fn open_failing_browser(
     cx: &mut TestAppContext,
-    dir: &Path,
+    pages: Pages<SqlCipherStore>,
 ) -> (WindowHandle<Root>, Entity<PageBrowser<FailingStore>>) {
-    open_browser_with(cx, Pages::new(FailingStore::new(open_pages(dir))))
+    open_browser_with(
+        cx,
+        Pages::with_clock(FailingStore::new(pages), SteppingClock::new()),
+    )
 }
 
 fn open_browser_with<S: PageStore + 'static>(
@@ -119,8 +117,8 @@ fn replace_title(window: &mut Window, title: &str, cx: &mut gpui_kit::App) {
 
 #[gpui_kit::test]
 fn 編集して保存すると保存した内容を表示する(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", "")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -156,8 +154,8 @@ fn 編集して保存すると保存した内容を表示する(cx: &mut TestApp
 
 #[gpui_kit::test]
 fn キーボードのショートカットで保存できる(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", "本文")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -182,8 +180,8 @@ fn キーボードのショートカットで保存できる(cx: &mut TestAppCon
 
 #[gpui_kit::test]
 fn キャンセルすると編集した内容を捨てる(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    let (window, _) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", "本文")]);
+    let (window, _) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -208,8 +206,8 @@ fn キャンセルすると編集した内容を捨てる(cx: &mut TestAppContex
 
 #[gpui_kit::test]
 fn 新しいページを作ってタイトルを書き保存できる(cx: &mut TestAppContext) {
-    let dir = data_with(&[("既存のページ", "本文")]);
-    let (window, _) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("既存のページ", "本文")]);
+    let (window, _) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -249,8 +247,8 @@ fn 新しいページを作ってタイトルを書き保存できる(cx: &mut T
 
 #[gpui_kit::test]
 fn 編集中にほかのページを選ぶと保存してから移る(cx: &mut TestAppContext) {
-    let dir = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -292,8 +290,8 @@ fn 編集中にほかのページを選ぶと保存してから移る(cx: &mut T
 fn 変換中の文字は確定した文字に置き換わって保存される(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("タイトル", "")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", "")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -329,9 +327,9 @@ fn 変換中の文字は確定した文字に置き換わって保存される(
 fn unmarkで確定した本文も別のページを選ぶと保存される(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("移動先", "本文"), ("編集対象", "")]);
+    let (dir, pages) = data_with(&[("移動先", "本文"), ("編集対象", "")]);
     let edited_id = stored_pages(dir.path())[0].id;
-    let (window, browser) = open_browser(cx, dir.path());
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -378,9 +376,9 @@ fn unmarkで確定した本文も別のページを選ぶと保存される(
 fn 無変更や元に戻した編集ではページを移っても更新しない(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
+    let (dir, pages) = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
     let before = stored_pages(dir.path());
-    let (window, browser) = open_browser(cx, dir.path());
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -440,9 +438,9 @@ fn error_label(window: &Window) -> Option<String> {
 fn 保存できなければ別のページへ移らず_キャンセルするとエラーを消す(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
+    let (dir, pages) = data_with(&[("1つめ", "本文1"), ("2つめ", "本文2")]);
     let before = stored_pages(dir.path());
-    let (window, browser) = open_failing_browser(cx, dir.path());
+    let (window, browser) = open_failing_browser(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -521,8 +519,8 @@ fn 保存できなければ別のページへ移らず_キャンセルすると�
 fn 編集中にウィンドウを閉じると変えた内容を保存する(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    let (window, _) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", "本文")]);
+    let (window, _) = open_browser_with(cx, pages);
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     assert!(
         visual.simulate_close(),
@@ -549,8 +547,8 @@ fn 編集中にウィンドウを閉じると変えた内容を保存する(
 
 #[gpui_kit::test]
 fn 保存できなければウィンドウを閉じない(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    let (window, browser) = open_failing_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "本文")]);
+    let (window, browser) = open_failing_browser(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -579,8 +577,8 @@ fn 保存できなければウィンドウを閉じない(cx: &mut TestAppContex
 
 #[gpui_kit::test]
 fn 本文の入力はmarkdownの記法を装飾する(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "本文")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -609,8 +607,8 @@ fn punctuation_color(cx: &gpui_kit::App) -> Option<Hsla> {
 
 #[gpui_kit::test]
 fn ライトとダークを切り替えても記法の装飾を保つ(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "本文")]);
-    open_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "本文")]);
+    open_browser_with(cx, pages);
 
     cx.update(|cx| {
         let light = punctuation_color(cx);
@@ -645,8 +643,8 @@ fn decorated_texts(browser: &Entity<Browser>, cx: &gpui_kit::App) -> Vec<String>
 fn 編集を始めるとwikiリンクを記号とタイトルに分けて装飾する(
     cx: &mut TestAppContext,
 ) {
-    let dir = data_with(&[("タイトル", "前に[[はじめに]]と`[[コード]]`がある")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "前に[[はじめに]]と`[[コード]]`がある")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -676,8 +674,8 @@ fn commit_body(
 
 #[gpui_kit::test]
 fn 編集してもwikiリンクの装飾が本文の位置とずれない(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "[[はじめに]]")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "[[はじめに]]")]);
+    let (window, browser) = open_browser_with(cx, pages);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("edit", cx);
@@ -718,8 +716,8 @@ fn 編集してもwikiリンクの装飾が本文の位置とずれない(cx: &m
 
 #[gpui_kit::test]
 fn 変換中の文字を足してもwikiリンクの装飾がずれない(cx: &mut TestAppContext) {
-    let dir = data_with(&[("タイトル", "[[はじめに]]")]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (_dir, pages) = data_with(&[("タイトル", "[[はじめに]]")]);
+    let (window, browser) = open_browser_with(cx, pages);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -765,8 +763,8 @@ fn edit_body_at_end(
     cx: &mut TestAppContext,
     body: &str,
 ) -> (TempDir, WindowHandle<Root>, Entity<Browser>) {
-    let dir = data_with(&[("タイトル", body)]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (dir, pages) = data_with(&[("タイトル", body)]);
+    let (window, browser) = open_browser_with(cx, pages);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("edit", cx);
@@ -936,7 +934,7 @@ fn 字下げを取り消すと元のカーソルへ戻る(cx: &mut TestAppContex
             body_text(&browser, cx),
             "前の行\n  - 本文",
             "本文の位置と字下げが違う"
-        )
+        );
     });
     press_in_body(cx, window, &secondary("z"));
     cx.update(|cx| {
@@ -1070,13 +1068,13 @@ fn edit_with_pages(
     cx: &mut TestAppContext,
     body: &str,
 ) -> (TempDir, WindowHandle<Root>, Entity<Browser>) {
-    let dir = data_with(&[
+    let (dir, pages) = data_with(&[
         ("はじめに", ""),
         ("議事録", ""),
         ("はじめての設定", ""),
         ("編集するページ", body),
     ]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (window, browser) = open_browser_with(cx, pages);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("edit", cx);
@@ -1239,14 +1237,14 @@ fn 閉じる記号を打つと候補を閉じる(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn wikiリンクとして表せるタイトルだけを補完する(cx: &mut TestAppContext) {
-    let dir = data_with(&[
+    let (_dir, pages) = data_with(&[
         ("　", ""),
         ("議事録]]追記", ""),
         (" はじめに", ""),
         ("はじめに", ""),
         ("編集中", ""),
     ]);
-    let (window, browser) = open_browser(cx, dir.path());
+    let (window, browser) = open_browser_with(cx, pages);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("edit", cx);
