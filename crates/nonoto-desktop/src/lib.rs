@@ -5,6 +5,7 @@ mod wikilink_completion;
 mod wikilink_decoration;
 mod wikilink_view;
 
+use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -30,6 +31,7 @@ actions!(nonoto, [SavePage]);
 const KEY_CONTEXT: &str = "PageBrowser";
 
 /// コアが編集不要と判断したとき、部品の既定の処理へ渡すか。
+#[derive(Clone, Copy)]
 enum NoEditBehavior {
     Delegate,
     Consume,
@@ -51,6 +53,7 @@ pub fn init(cx: &mut App) {
 /// ページの一覧と、選んだページの本文を並べて表示する画面。
 ///
 /// テストと支援技術 (VoiceOverなど) から要素を読めるよう、要素にIDと役割と名前を付ける。
+/// デバッグ表示ではページの内容を伏せ、選択と編集の有無を表示する。
 pub struct PageBrowser<S> {
     pages: Pages<S>,
     list: Entity<ListState<PageList>>,
@@ -66,6 +69,15 @@ pub struct PageBrowser<S> {
     /// 本文の入力のWikiリンクの装飾。
     wikilinks: TextDecorationCollection,
     _subscriptions: Vec<Subscription>,
+}
+
+impl<S> fmt::Debug for PageBrowser<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PageBrowser")
+            .field("page_selected", &self.selected_id.is_some())
+            .field("editing", &self.editing.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// 編集を始めたときの内容。変更の通知を出さないIMEの確定も保存できるよう、終了時に入力と比べる。
@@ -203,8 +215,9 @@ impl<S: PageStore + 'static> PageBrowser<S> {
             })
             .ok()
             .and_then(Result::ok)
-            .map(|summaries| summaries.into_iter().map(|summary| summary.title).collect())
-            .unwrap_or_default()
+            .map_or_default(|summaries| {
+                summaries.into_iter().map(|summary| summary.title).collect()
+            })
         });
         body_input.update(cx, |state, _| {
             let lsp = state.lsp_mut();
@@ -260,14 +273,13 @@ impl<S: PageStore + 'static> PageBrowser<S> {
             .or_else(|| summaries.first().map(|summary| summary.id));
         self.list
             .update(cx, |list, _| list.delegate_mut().summaries = summaries);
-        match selected {
-            Some(id) => self.select(id, window, cx),
-            None => {
-                self.selected_id = None;
-                self.shown = None;
-                self.sync_selection(window, cx);
-                cx.notify();
-            }
+        if let Some(id) = selected {
+            self.select(id, window, cx);
+        } else {
+            self.selected_id = None;
+            self.shown = None;
+            self.sync_selection(window, cx);
+            cx.notify();
         }
     }
 
@@ -396,10 +408,10 @@ impl<S: PageStore + 'static> PageBrowser<S> {
             original_body: body.clone(),
         };
         self.title_input.update(cx, |input, cx| {
-            input.set_value(editing.original_title.clone(), window, cx)
+            input.set_value(editing.original_title.clone(), window, cx);
         });
         self.body_input.update(cx, |input, cx| {
-            input.set_value(editing.original_body.clone(), window, cx)
+            input.set_value(editing.original_body.clone(), window, cx);
         });
         // 本文を入れ替えたときは変更の通知が出ないため、ここで装飾を付け直す。
         self.refresh_wikilinks(cx);
@@ -697,7 +709,7 @@ impl<S: PageStore + 'static> PageBrowser<S> {
                                     match wikilink_view::target_index(url) {
                                         Some(index) => {
                                             this.update(cx, |this, cx| {
-                                                this.open_wikilink(index, window, cx)
+                                                this.open_wikilink(index, window, cx);
                                             })
                                             .ok();
                                         }
@@ -728,7 +740,10 @@ impl<S: PageStore + 'static> PageBrowser<S> {
             .p_6()
             .gap_4()
             // 編集中は本文の入力が自分でスクロールするため、ページの側ではスクロールしない。
-            .when(!editing, |pane| pane.overflow_y_scroll())
+            .when(
+                !editing,
+                gpui_kit::StatefulInteractiveElement::overflow_y_scroll,
+            )
             .child(toolbar)
             .when_some(self.error.clone(), |pane, error| {
                 pane.child(

@@ -3,6 +3,8 @@
 //! 既定ではsqlite3mcに、機能 `sqlcipher` ではSQLCipherにリンクする。
 //! ストアの形 (テーブル・トランザクション・鍵の渡し方) は `nonoto-core` の `SqlCipherStore` に揃える。
 
+use std::fmt;
+use std::fmt::Write as _;
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -34,6 +36,14 @@ impl Key {
     }
 }
 
+/// 鍵の値を出さない。
+impl fmt::Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Key(..)")
+    }
+}
+
+/// デバッグ表示ではタイトルと本文を伏せる。
 pub struct Page {
     pub id: String,
     pub title: String,
@@ -41,7 +51,17 @@ pub struct Page {
     pub updated_at: i64,
 }
 
+impl fmt::Debug for Page {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Page")
+            .field("id", &self.id)
+            .field("updated_at", &self.updated_at)
+            .finish_non_exhaustive()
+    }
+}
+
 /// データベース全体を暗号化したストア。
+#[derive(Debug)]
 pub struct Store {
     conn: Connection,
 }
@@ -126,12 +146,12 @@ impl Store {
 ///
 /// sqlite3mcの既定の暗号 (ChaCha20-Poly1305) も、SQLCipherと同じ `x'...'` の書き方で生の鍵を受け付ける。
 fn apply_key(conn: &Connection, key: &Key) -> rusqlite::Result<()> {
-    let hex: Zeroizing<String> = Zeroizing::new(
-        key.as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-    );
+    let hex: Zeroizing<String> =
+        Zeroizing::new(key.as_bytes().iter().fold(String::new(), |mut hex, byte| {
+            // Stringへの書き込みは失敗しない。
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        }));
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", hex.as_str()));
     conn.execute_batch(&statement)
 }

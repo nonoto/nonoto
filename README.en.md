@@ -65,6 +65,7 @@ If Cargo cannot find such a version, dependency resolution fails.
 During that time, name the crate when upgrading other dependencies: `cargo update <crate>`.
 
 Dependencies used in two or more places keep their versions in `[workspace.dependencies]` in the workspace `Cargo.toml`.
+`make lint` fails when it finds an unused dependency in `[dependencies]` or `[build-dependencies]`.
 
 ## Repeating tests
 

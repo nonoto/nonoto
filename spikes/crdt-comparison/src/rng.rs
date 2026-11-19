@@ -1,6 +1,7 @@
 //! 計測のデータとテストの操作の列を作る乱数。
 
 /// 固定した種から、実行のたびに同じ列を出す乱数 (SplitMix64)。
+#[derive(Debug)]
 pub struct SeededRng(u64);
 
 impl SeededRng {
@@ -18,7 +19,7 @@ impl SeededRng {
 
     /// `0..n` の値を返す。`n` は1以上にする。
     pub fn below(&mut self, n: usize) -> usize {
-        (self.next_u64() % n as u64) as usize
+        usize::try_from(self.next_u64() % n as u64).expect("n未満の値はusizeに収まる")
     }
 
     pub fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {

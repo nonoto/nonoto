@@ -9,8 +9,8 @@ const TEXT: &str = "あい😀";
 
 fn replica_pair<R: Replica>() -> (R, R) {
     let mut a = R::new();
-    a.insert(0, TEXT).unwrap();
-    let b = a.replicate().unwrap();
+    a.insert(0, TEXT).expect("文書に文字列を挿入できなかった");
+    let b = a.replicate().expect("文書を写せなかった");
     (a, b)
 }
 
@@ -28,24 +28,24 @@ fn loroは文字の途中の位置への挿入と削除をエラーにして本�
 fn automergeは文字の途中の位置を後ろの文字の境界に丸める() {
     let (mut a, mut b) = replica_pair::<AutomergeReplica>();
     // 「あ」の途中 (1バイト目) への挿入は、「あ」の後ろに入る。
-    let update = a.insert(1, "x").unwrap();
+    let update = a.insert(1, "x").expect("文書に文字列を挿入できなかった");
     assert_eq!(a.text(), "あxい😀");
-    b.apply_update(&update).unwrap();
+    b.apply_update(&update).expect("更新を当てられなかった");
     assert_eq!(b.text(), a.text());
 
     // 「😀」の途中への挿入は、「😀」の後ろに入る。
     let (mut a, _) = replica_pair::<AutomergeReplica>();
-    a.insert(8, "x").unwrap();
+    a.insert(8, "x").expect("文書に文字列を挿入できなかった");
     assert_eq!(a.text(), "あい😀x");
 
     // 開始と長さも丸めるため、「あ」の途中から1バイトの削除は「い」を消す。
     let (mut a, _) = replica_pair::<AutomergeReplica>();
-    a.delete(1, 1).unwrap();
+    a.delete(1, 1).expect("本文を削除できなかった");
     assert_eq!(a.text(), "あ😀");
 
     // 先頭から1バイトの削除は、「あ」を消す。
     let (mut a, _) = replica_pair::<AutomergeReplica>();
-    a.delete(0, 1).unwrap();
+    a.delete(0, 1).expect("本文を削除できなかった");
     assert_eq!(a.text(), "い😀");
 }
 

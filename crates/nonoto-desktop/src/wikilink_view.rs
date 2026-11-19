@@ -85,6 +85,8 @@ fn push_escaped(markdown: &mut String, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use gpui_kit::base::text::editor_host::{BlockNode, parse_markdown};
 
     use super::*;
@@ -163,7 +165,7 @@ mod tests {
     /// 表示用のMarkdownが、強調・リンク・画像の無い1つの段落になり、表示する文字が `expected_text` になることを確かめる。
     fn assert_parsed_text(markdown: &str, expected_text: &str) {
         let nodes =
-            parse_markdown(markdown, Default::default()).expect("表示用のMarkdownを解析できない");
+            parse_markdown(markdown, Arc::default()).expect("表示用のMarkdownを解析できない");
         let [BlockNode::Paragraph(paragraph)] = nodes.as_slice() else {
             panic!("表示用のMarkdownが段落にならない: {nodes:?}");
         };
@@ -183,7 +185,7 @@ mod tests {
 
     fn assert_parsed_link(markdown: &str, expected_text: &str) {
         let nodes =
-            parse_markdown(markdown, Default::default()).expect("表示用のMarkdownを解析できない");
+            parse_markdown(markdown, Arc::default()).expect("表示用のMarkdownを解析できない");
         let [BlockNode::Paragraph(paragraph)] = nodes.as_slice() else {
             panic!("表示用のMarkdownが段落にならない: {nodes:?}");
         };

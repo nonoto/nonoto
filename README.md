@@ -61,6 +61,7 @@ CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update <クレート> --prec
 そのあいだにほかの依存を上げるときは、`cargo update <クレート>` でクレートを指定します。
 
 2つ以上の場所で使う依存は、ワークスペースの `Cargo.toml` の `[workspace.dependencies]` でバージョンを持ちます。
+`make lint` は、使っていない依存を `[dependencies]` と `[build-dependencies]` に見つけると失敗します。
 
 ## テストを繰り返して確かめる
 

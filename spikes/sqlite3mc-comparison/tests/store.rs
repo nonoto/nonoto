@@ -151,3 +151,29 @@ fn 全文検索のテーブルを作れる() {
 
     assert_eq!(found, 1, "全文検索で見つからない");
 }
+
+#[test]
+fn ページをデバッグ表示してもタイトルと本文を出さない() {
+    let page = page("id-1", "伏せるタイトル", "伏せる本文");
+
+    let debug = format!("{page:?}");
+    assert!(
+        !debug.contains("伏せるタイトル"),
+        "ページのデバッグ表示にタイトルが含まれている"
+    );
+    assert!(
+        !debug.contains("伏せる本文"),
+        "ページのデバッグ表示に本文が含まれている"
+    );
+}
+
+#[test]
+fn 鍵をデバッグ表示しても値を出さない() {
+    let key = Key::from_bytes([0xAB; 32]);
+
+    assert_eq!(
+        format!("{key:?}"),
+        "Key(..)",
+        "鍵のデバッグ表示がマスクされていない"
+    );
+}

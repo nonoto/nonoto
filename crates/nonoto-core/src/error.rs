@@ -34,7 +34,7 @@ pub enum Error {
     /// どの段階で失敗したかと、SQLiteの拡張エラーコードを残す。
     #[error(
         "ストアを開けない ({stage}で失敗した。SQLiteの拡張エラーコード: {})",
-        code_text(.extended_code)
+        code_text(*.extended_code)
     )]
     OpenStore {
         /// 失敗した段階。
@@ -102,7 +102,7 @@ impl std::fmt::Display for OpenStage {
     }
 }
 
-fn code_text(code: &Option<i32>) -> String {
+fn code_text(code: Option<i32>) -> String {
     code.map_or_else(|| "無し".to_owned(), |code| code.to_string())
 }
 

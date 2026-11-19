@@ -276,6 +276,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "方式ごとに同じ手順で検索し、結果を並べて比べる流れを1か所で読めるようにするため"
+    )]
     fn 各方式の検索結果の項目と順序が一致する() {
         let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
         let key = Key::generate().expect("鍵を作れなかった");

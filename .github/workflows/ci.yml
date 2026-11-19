@@ -79,6 +79,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      # make lint は開発環境のOS向けにだけ検査するため、OSごとに分けたコードと依存を持つコアは、各OS向けにも検査する。
+      - name: コアをclippyで検査する
+        shell: bash
+        run: cargo clippy -p nonoto-core --all-targets --target ${{ matrix.target }} --locked --config 'build.warnings="deny"'
       - run: cargo build -p nonoto-core --target ${{ matrix.target }} --locked
       # 全文検索のトークナイザーをCのAPIで登録するコードも、各OS向けにビルドできることを確かめる。
       - run: cargo build -p store-comparison --target ${{ matrix.target }} --locked

@@ -14,6 +14,7 @@ const SERVICE: &str = "nonoto";
 /// 鍵をOSのキーチェーンに保管する。
 ///
 /// 項目は、サービス名と、データの置き場ごとのアカウント名で分ける。
+#[derive(Debug)]
 pub struct KeychainKeyStore {
     account: String,
     lock_path: PathBuf,

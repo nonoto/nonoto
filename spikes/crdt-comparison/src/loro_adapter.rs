@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use loro::event::{Diff, DiffEvent};
@@ -15,10 +16,17 @@ const TEXT_NAME: &str = "body";
 /// 位置は `insert_utf8`・`delete_utf8` で、UTF-8のバイト数で数える。
 /// 届いた更新の差分はUnicodeのコードポイントで数えられ、削除した長さをUTF-8のバイト数にするには
 /// 変更の前の本文が要るため、本文の写し (`body`) を持つ。
+/// デバッグ表示では本文を伏せる。
 pub struct LoroReplica {
     doc: LoroDoc,
     text: LoroText,
     body: String,
+}
+
+impl fmt::Debug for LoroReplica {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoroReplica").finish_non_exhaustive()
+    }
 }
 
 /// 届いた差分の、コードポイントで数えた操作。

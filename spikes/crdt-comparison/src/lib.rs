@@ -3,8 +3,6 @@
 //! 候補ごとのアダプターが [`Replica`] を実装する。
 //! テストと計測は [`Replica`] だけを使って書き、すべての候補に同じ操作の列を当てる。
 
-#![forbid(unsafe_code)]
-
 mod automerge_adapter;
 pub mod data;
 mod loro_adapter;

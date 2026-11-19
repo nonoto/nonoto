@@ -190,7 +190,9 @@ pub fn generate_pages(count: usize) -> Vec<Page> {
                 format!("{}の{}", words[random.skewed(words.len())], i)
             };
             let at = base
-                .checked_add(jiff::SignedDuration::from_secs(i as i64))
+                .checked_add(jiff::SignedDuration::from_secs(
+                    i64::try_from(i).expect("ページの番号はi64に収まる"),
+                ))
                 .expect("日時を作れなかった");
             Page {
                 id: PageId::new(),

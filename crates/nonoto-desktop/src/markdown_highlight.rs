@@ -86,6 +86,7 @@ fn markdown_syntax(base: &SyntaxColors, colors: &ThemeColor) -> SyntaxColors {
 }
 
 /// 色のほかに変える書体。
+#[derive(Clone, Copy)]
 enum Look {
     Plain,
     Bold,

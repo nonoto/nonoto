@@ -116,6 +116,42 @@ fn replace_title(window: &mut Window, title: &str, cx: &mut gpui_kit::App) {
 }
 
 #[gpui_kit::test]
+fn 画面をデバッグ表示しても表示中と編集中のページの内容を出さない(
+    cx: &mut TestAppContext,
+) {
+    let title = "デバッグ表示から伏せるタイトル";
+    let body = "デバッグ表示から伏せる本文";
+    let (_dir, pages) = data_with(&[(title, body)]);
+    let (window, browser) = open_browser_with(cx, pages);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("page-title").label(),
+            Some(title),
+            "ページが表示されていない"
+        );
+        let viewing = format!("{:?}", browser.read(cx));
+
+        window.click("edit", cx);
+        assert!(browser.read(cx).is_editing(), "編集を開始できなかった");
+        let editing = format!("{:?}", browser.read(cx));
+
+        for (state, debug) in [("表示中", viewing), ("編集中", editing)] {
+            assert!(
+                !debug.contains(title),
+                "{state}の画面のデバッグ表示にタイトルが含まれている"
+            );
+            assert!(
+                !debug.contains(body),
+                "{state}の画面のデバッグ表示に本文が含まれている"
+            );
+        }
+    })
+    .expect("ウィンドウを更新できなかった");
+}
+
+#[gpui_kit::test]
 fn 編集して保存すると保存した内容を表示する(cx: &mut TestAppContext) {
     let (dir, pages) = data_with(&[("タイトル", "")]);
     let (window, browser) = open_browser_with(cx, pages);

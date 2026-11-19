@@ -27,10 +27,16 @@ mod yrs_capabilities {
         let update = from
             .transact()
             .encode_state_as_update_v1(&to.transact().state_vector());
-        let update = Update::decode_v1(&update).unwrap();
+        let update = Update::decode_v1(&update).expect("更新を読めなかった");
         match origin {
-            Some(origin) => to.transact_mut_with(origin).apply_update(update).unwrap(),
-            None => to.transact_mut().apply_update(update).unwrap(),
+            Some(origin) => to
+                .transact_mut_with(origin)
+                .apply_update(update)
+                .expect("更新を当てられなかった"),
+            None => to
+                .transact_mut()
+                .apply_update(update)
+                .expect("更新を当てられなかった"),
         }
     }
 
@@ -87,30 +93,49 @@ mod yrs_capabilities {
         text.insert(&mut mine.transact_mut(), 0, "あいう");
         sync(&mine, &theirs, None);
         let sticky = text
-            .sticky_index(&mine.transact(), "あい".len() as u32, Assoc::After)
-            .unwrap();
+            .sticky_index(
+                &mine.transact(),
+                u32::try_from("あい".len()).expect("位置はu32に収まる"),
+                Assoc::After,
+            )
+            .expect("位置を指す値を作れなかった");
         // 位置を指す値は、バイト列にして送れる。
         let encoded = yrs::updates::encoder::Encode::encode_v1(&sticky);
-        let sticky = yrs::StickyIndex::decode_v1(&encoded).unwrap();
+        let sticky = yrs::StickyIndex::decode_v1(&encoded).expect("位置を指す値を読めなかった");
 
         let their_text = theirs.get_or_insert_text("body");
         their_text.insert(&mut theirs.transact_mut(), 0, "😀");
         sync(&theirs, &mine, Some("remote"));
-        let offset = sticky.get_offset(&mine.transact()).unwrap();
+        let offset = sticky
+            .get_offset(&mine.transact())
+            .expect("位置を指す値から位置を求められなかった");
         assert_eq!(offset.index as usize, "😀あい".len());
     }
 
     #[test]
     fn 削除した文字を消した文書で古い版を指すとエラーにならず今の本文が返る() {
         let mut author = YrsReplica::new();
-        author.insert(0, "消す本文").unwrap();
+        author
+            .insert(0, "消す本文")
+            .expect("文書に文字列を挿入できなかった");
         let old = author.version();
-        author.delete(0, "消す".len()).unwrap();
-        let mut compacted =
-            YrsReplica::from_snapshot(&author.compacted_snapshot().unwrap()).unwrap();
+        author
+            .delete(0, "消す".len())
+            .expect("本文を削除できなかった");
+        let mut compacted = YrsReplica::from_snapshot(
+            &author
+                .compacted_snapshot()
+                .expect("履歴をまとめたスナップショットを出力できなかった"),
+        )
+        .expect("スナップショットから文書を作れなかった");
         assert_eq!(compacted.text(), "本文");
         // 削除した文字が消えているため、版の時点の本文を組み立て直せず、黙って今の本文になる。
-        assert_eq!(compacted.text_at(&old).unwrap(), "本文");
+        assert_eq!(
+            compacted
+                .text_at(&old)
+                .expect("指定した版の本文を読めなかった"),
+            "本文"
+        );
     }
 
     #[test]
@@ -149,23 +174,32 @@ mod automerge_capabilities {
 
     fn doc() -> (AutoCommit, automerge::ObjId) {
         let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf8CodeUnit);
-        let text = doc.put_object(ROOT, "body", ObjType::Text).unwrap();
+        let text = doc
+            .put_object(ROOT, "body", ObjType::Text)
+            .expect("文書にオブジェクトを置けなかった");
         (doc, text)
     }
 
     #[test]
     fn 位置はバイト数で数えられ相手の挿入を越えて保たれる() {
         let (mut mine, text) = doc();
-        mine.splice_text(&text, 0, 0, "あいう").unwrap();
+        mine.splice_text(&text, 0, 0, "あいう")
+            .expect("本文を置き換えられなかった");
         let mut theirs = mine.fork();
-        let cursor = mine.get_cursor(&text, "あい".len(), None).unwrap();
+        let cursor = mine
+            .get_cursor(&text, "あい".len(), None)
+            .expect("カーソルを作れなかった");
         // 位置を指す値は、バイト列にして送れる。
-        let cursor = automerge::Cursor::try_from(cursor.to_bytes().as_slice()).unwrap();
+        let cursor = automerge::Cursor::try_from(cursor.to_bytes().as_slice())
+            .expect("位置を指す値を読めなかった");
 
-        theirs.splice_text(&text, 0, 0, "😀").unwrap();
-        mine.merge(&mut theirs).unwrap();
+        theirs
+            .splice_text(&text, 0, 0, "😀")
+            .expect("本文を置き換えられなかった");
+        mine.merge(&mut theirs).expect("文書を合わせられなかった");
         assert_eq!(
-            mine.get_cursor_position(&text, &cursor, None).unwrap(),
+            mine.get_cursor_position(&text, &cursor, None)
+                .expect("カーソルの位置を読めなかった"),
             "😀あい".len()
         );
     }
@@ -173,17 +207,20 @@ mod automerge_capabilities {
     #[test]
     fn マージの前に分岐の差分をパッチで取り出せる() {
         let (mut main, text) = doc();
-        main.splice_text(&text, 0, 0, "本文").unwrap();
+        main.splice_text(&text, 0, 0, "本文")
+            .expect("本文を置き換えられなかった");
         let mut branch = main.fork();
         let base = branch.get_heads();
-        branch.splice_text(&text, 0, 0, "提案").unwrap();
+        branch
+            .splice_text(&text, 0, 0, "提案")
+            .expect("本文を置き換えられなかった");
         let head = branch.get_heads();
         let patches = branch.diff(&base, &head);
         assert!(patches.iter().any(|p| matches!(
             &p.action,
             PatchAction::SpliceText { index: 0, value, .. } if value.make_string() == "提案"
         )));
-        assert_eq!(main.text(&text).unwrap(), "本文");
+        assert_eq!(main.text(&text).expect("本文を読めなかった"), "本文");
     }
 
     #[test]
@@ -205,24 +242,32 @@ mod loro_capabilities {
         let mut undo = UndoManager::new(&mine);
         let text = mine.get_text("body");
 
-        text.insert(0, "自分の").unwrap();
+        text.insert(0, "自分の")
+            .expect("文書に文字列を挿入できなかった");
         mine.commit();
         theirs
-            .import(&mine.export(ExportMode::Snapshot).unwrap())
-            .unwrap();
-        theirs.get_text("body").insert(0, "相手の").unwrap();
+            .import(
+                &mine
+                    .export(ExportMode::Snapshot)
+                    .expect("文書を出力できなかった"),
+            )
+            .expect("文書に更新を取り込めなかった");
+        theirs
+            .get_text("body")
+            .insert(0, "相手の")
+            .expect("文書に文字列を挿入できなかった");
         theirs.commit();
         mine.import(
             &theirs
                 .export(ExportMode::updates(&mine.oplog_vv()))
-                .unwrap(),
+                .expect("文書を出力できなかった"),
         )
-        .unwrap();
+        .expect("文書に更新を取り込めなかった");
         assert_eq!(text.to_string(), "相手の自分の");
 
-        assert!(undo.undo().unwrap());
+        assert!(undo.undo().expect("取り消せなかった"));
         assert_eq!(text.to_string(), "相手の");
-        assert!(undo.redo().unwrap());
+        assert!(undo.redo().expect("やり直せなかった"));
         assert_eq!(text.to_string(), "相手の自分の");
     }
 
@@ -230,33 +275,54 @@ mod loro_capabilities {
     fn 位置はコードポイントで数えられ相手の挿入を越えて保たれる() {
         let mine = LoroDoc::new();
         let text = mine.get_text("body");
-        text.insert(0, "あいう").unwrap();
+        text.insert(0, "あいう")
+            .expect("文書に文字列を挿入できなかった");
         mine.commit();
         let theirs = mine.fork();
         // 位置の指定と結果は、コードポイントで数える。
-        let cursor = text.get_cursor(2, Side::Middle).unwrap();
+        let cursor = text
+            .get_cursor(2, Side::Middle)
+            .expect("カーソルを作れなかった");
         // 位置を指す値は、バイト列にして送れる。
-        let cursor = loro::cursor::Cursor::decode(&cursor.encode()).unwrap();
+        let cursor =
+            loro::cursor::Cursor::decode(&cursor.encode()).expect("位置を指す値を読めなかった");
 
-        theirs.get_text("body").insert(0, "😀").unwrap();
+        theirs
+            .get_text("body")
+            .insert(0, "😀")
+            .expect("文書に文字列を挿入できなかった");
         theirs.commit();
         mine.import(
             &theirs
                 .export(ExportMode::updates(&mine.oplog_vv()))
-                .unwrap(),
+                .expect("文書を出力できなかった"),
         )
-        .unwrap();
-        assert_eq!(mine.get_cursor_pos(&cursor).unwrap().current.pos, 3);
+        .expect("文書に更新を取り込めなかった");
+        assert_eq!(
+            mine.get_cursor_pos(&cursor)
+                .expect("カーソルの位置を読めなかった")
+                .current
+                .pos,
+            3
+        );
     }
 
     #[test]
     fn 履歴をまとめた文書では古い版の本文を取り出せない() {
         let mut author = LoroReplica::new();
-        author.insert(0, "消す本文").unwrap();
+        author
+            .insert(0, "消す本文")
+            .expect("文書に文字列を挿入できなかった");
         let old = author.version();
-        author.delete(0, "消す".len()).unwrap();
-        let mut compacted =
-            LoroReplica::from_snapshot(&author.compacted_snapshot().unwrap()).unwrap();
+        author
+            .delete(0, "消す".len())
+            .expect("本文を削除できなかった");
+        let mut compacted = LoroReplica::from_snapshot(
+            &author
+                .compacted_snapshot()
+                .expect("履歴をまとめたスナップショットを出力できなかった"),
+        )
+        .expect("スナップショットから文書を作れなかった");
         assert_eq!(compacted.text(), "本文");
         assert!(compacted.text_at(&old).is_err());
     }
@@ -264,13 +330,20 @@ mod loro_capabilities {
     #[test]
     fn マージの前に分岐の差分を取り出せる() {
         let main = LoroDoc::new();
-        main.get_text("body").insert(0, "本文").unwrap();
+        main.get_text("body")
+            .insert(0, "本文")
+            .expect("文書に文字列を挿入できなかった");
         main.commit();
         let branch = main.fork();
         let base = branch.oplog_frontiers();
-        branch.get_text("body").insert(0, "提案").unwrap();
+        branch
+            .get_text("body")
+            .insert(0, "提案")
+            .expect("文書に文字列を挿入できなかった");
         branch.commit();
-        let diff = branch.diff(&base, &branch.oplog_frontiers()).unwrap();
+        let diff = branch
+            .diff(&base, &branch.oplog_frontiers())
+            .expect("版の間の差分を求められなかった");
         assert!(format!("{diff:?}").contains("提案"));
         assert_eq!(main.get_text("body").to_string(), "本文");
     }

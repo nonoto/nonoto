@@ -32,6 +32,7 @@ impl Scheme {
     }
 }
 
+#[derive(Debug)]
 pub struct Measurement {
     pub elapsed: Duration,
     pub rss_increase_kib: Option<u64>,
@@ -51,8 +52,7 @@ pub fn run_worker(scheme: Scheme, path: &Path) {
     };
     let rss = measured
         .rss_increase_kib
-        .map(|kib| kib.to_string())
-        .unwrap_or_else(|| "-".to_owned());
+        .map_or_else(|| "-".to_owned(), |kib| kib.to_string());
     println!("{} {rss}", measured.elapsed.as_nanos());
 }
 
