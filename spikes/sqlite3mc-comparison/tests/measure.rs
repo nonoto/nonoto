@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use sqlite3mc_comparison::IMPLEMENTATION;
+
 #[test]
 fn ゼロ件の入力は計測せずに拒否する() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
@@ -23,6 +25,33 @@ fn ゼロ件の入力は計測せずに拒否する() {
         0,
         "入力を拒否する前にデータベースを作った"
     );
+}
+
+#[test]
+fn データベースを消せないときは対象を伝えて失敗終了する() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリを作れなかった");
+    let path = dir.path().join(format!("{IMPLEMENTATION}.db"));
+    std::fs::create_dir(&path).expect("データベースと同名のディレクトリを作れなかった");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sqlite3mc-comparison"))
+        .args(["--row", "--pages", "1", "--dir"])
+        .arg(dir.path())
+        .output()
+        .expect("計測を起動できなかった");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "計測が失敗の終了コードを返さなかった"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("エラー: 前の計測のデータベースを消せなかった")
+            && stderr.contains(path.to_string_lossy().as_ref()),
+        "削除できなかったデータベースを伝えていない: {stderr}"
+    );
+    assert_eq!(stderr.lines().count(), 1, "エラーを1行で表示していない");
+    assert!(output.stdout.is_empty(), "未計測の結果を出力した");
 }
 
 #[test]

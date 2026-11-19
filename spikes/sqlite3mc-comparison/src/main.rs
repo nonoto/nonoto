@@ -3,9 +3,9 @@
 //! 使い方: `cargo run --release -- [--pages 件数] [--dir ディレクトリ] [--baseline 実行ファイル]`
 //! `--baseline` に、機能 `sqlcipher` でビルドしたこのプログラムを渡すと、同じ条件で実行させ、結果を同じ表に並べる。
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
 use sqlite3mc_comparison::{IMPLEMENTATION, Key, Page, Store};
@@ -19,30 +19,43 @@ const REPEAT: usize = 5;
 /// 1件の保存・更新の計測に使う件数。
 const SINGLE_OPS: usize = 100;
 
-fn main() {
-    let args = Args::parse();
+fn main() -> ExitCode {
+    match run(Args::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("エラー: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(args: Args) -> io::Result<()> {
     if let Some(path) = args.measure_open {
         run_worker(&path);
-        return;
+        return Ok(());
     }
     let temp = std::env::temp_dir().join(format!("sqlite3mc-comparison-{}", std::process::id()));
     let dir = args.dir.clone().unwrap_or_else(|| temp.clone());
     std::fs::create_dir_all(&dir).expect("計測のディレクトリを作れなかった");
 
-    let row = measure(&dir.join(format!("{IMPLEMENTATION}.db")), args.pages);
+    let row = measure(&dir.join(format!("{IMPLEMENTATION}.db")), args.pages)?;
     if args.row_only {
         println!("{}", row.to_line());
     } else {
         let mut rows = vec![row];
         if let Some(baseline) = &args.baseline {
-            rows.push(run_baseline(baseline, &dir, args.pages));
+            rows.push(run_baseline(baseline, &dir, args.pages)?);
         }
         print_table(args.pages, &rows);
     }
 
-    if dir == temp {
-        let _ = std::fs::remove_dir_all(&temp);
+    // 計測の結果は書き終えているため、一時ディレクトリを消せなくても失敗にしない。
+    if dir == temp
+        && let Err(err) = std::fs::remove_dir_all(&temp)
+    {
+        eprintln!("一時ディレクトリを消せなかった ({}): {err}", temp.display());
     }
+    Ok(())
 }
 
 struct Args {
@@ -103,8 +116,7 @@ impl Row {
             self.insert_all.as_nanos().to_string(),
             self.startup.as_nanos().to_string(),
             self.startup_rss_kib
-                .map(|kib| kib.to_string())
-                .unwrap_or_else(|| "-".to_owned()),
+                .map_or_else(|| "-".to_owned(), |kib| kib.to_string()),
             self.insert.as_nanos().to_string(),
             self.update.as_nanos().to_string(),
             self.file_kib.to_string(),
@@ -132,8 +144,8 @@ impl Row {
     }
 }
 
-fn measure(path: &Path, count: usize) -> Row {
-    remove_database(path);
+fn measure(path: &Path, count: usize) -> io::Result<Row> {
+    remove_database(path)?;
     let key = Key::generate().expect("鍵を作れなかった");
     let pages = generate_pages(count, 0);
 
@@ -156,7 +168,7 @@ fn measure(path: &Path, count: usize) -> Row {
         for page in &extra {
             store.insert(page).expect("ページを保存できなかった");
         }
-    }) / SINGLE_OPS as u32;
+    }) / u32::try_from(SINGLE_OPS).expect("計る件数はu32に収まる");
     let updated = pages.len().min(SINGLE_OPS);
     let update = time(|| {
         for page in pages.iter().take(SINGLE_OPS) {
@@ -167,12 +179,12 @@ fn measure(path: &Path, count: usize) -> Row {
             assert!(found, "更新するページが無い");
         }
     })
-    .checked_div(updated as u32)
+    .checked_div(u32::try_from(updated).expect("更新する件数はu32に収まる"))
     .expect("更新の対象が無い");
     drop(store);
-    remove_database(path);
+    remove_database(path)?;
 
-    Row {
+    Ok(Row {
         implementation: IMPLEMENTATION.to_owned(),
         insert_all,
         startup,
@@ -181,7 +193,7 @@ fn measure(path: &Path, count: usize) -> Row {
         update,
         file_kib,
         plaintext_found,
-    }
+    })
 }
 
 /// 時間とRSSをそれぞれの中央値にする。RSSの計測が欠けたときは、5回の中央値を出せないため `None` にする。
@@ -200,15 +212,34 @@ fn startup_medians(samples: [(Duration, Option<u64>); REPEAT]) -> (Duration, Opt
 }
 
 /// 機能 `sqlcipher` でビルドしたこのプログラムを、同じ件数で実行させて結果を受け取る。
-fn run_baseline(program: &Path, dir: &Path, pages: usize) -> Row {
+fn run_baseline(program: &Path, dir: &Path, pages: usize) -> io::Result<Row> {
     let output = Command::new(program)
         .args(["--row", "--pages", &pages.to_string(), "--dir"])
         .arg(dir)
-        .stderr(Stdio::inherit())
         .output()
-        .expect("比べる実装の計測を起動できなかった");
-    assert!(output.status.success(), "比べる実装の計測が失敗した");
-    Row::from_line(&String::from_utf8(output.stdout).expect("計測の結果がUTF-8ではない"))
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("比べる実装の計測を起動できなかった: {err}"),
+            )
+        })?;
+    if !output.status.success() {
+        let mut message = format!("比べる実装の計測が失敗した ({})", output.status);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stderr
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            message.push_str(": ");
+            message.push_str(line.strip_prefix("エラー: ").unwrap_or(line));
+        }
+        return Err(io::Error::other(message));
+    }
+    io::stderr().write_all(&output.stderr)?;
+    Ok(Row::from_line(
+        &String::from_utf8(output.stdout).expect("計測の結果がUTF-8ではない"),
+    ))
 }
 
 fn print_table(pages: usize, rows: &[Row]) {
@@ -225,8 +256,7 @@ fn print_table(pages: usize, rows: &[Row]) {
             ms(row.insert_all),
             ms(row.startup),
             row.startup_rss_kib
-                .map(|kib| format!("{kib} KiB"))
-                .unwrap_or_else(|| "-".to_owned()),
+                .map_or_else(|| "-".to_owned(), |kib| format!("{kib} KiB")),
             ms(row.insert),
             ms(row.update),
             row.file_kib,
@@ -283,10 +313,10 @@ fn run_worker(path: &Path) {
     let elapsed = start.elapsed();
     let after = resident_kib();
     std::hint::black_box(&store);
-    let rss = before
-        .zip(after)
-        .map(|(before, after)| after.saturating_sub(before).to_string())
-        .unwrap_or_else(|| "-".to_owned());
+    let rss = before.zip(after).map_or_else(
+        || "-".to_owned(),
+        |(before, after)| after.saturating_sub(before).to_string(),
+    );
     println!("{} {rss}", elapsed.as_nanos());
 }
 
@@ -341,7 +371,7 @@ fn generate_pages(count: usize, offset: usize) -> Vec<Page> {
                 format!("ページ{i}")
             },
             body: (0..400).map(|_| WORDS[next() % WORDS.len()]).collect(),
-            updated_at: 1_700_000_000_000 + i as i64,
+            updated_at: 1_700_000_000_000 + i64::try_from(i).expect("ページの番号はi64に収まる"),
         })
         .collect()
 }
@@ -371,10 +401,25 @@ fn contains_marker(path: &Path) -> bool {
     })
 }
 
-fn remove_database(path: &Path) {
+fn remove_database(path: &Path) -> io::Result<()> {
     for file in database_files(path) {
-        let _ = std::fs::remove_file(file);
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            // 初めての計測ではファイルが無く、WAL・ジャーナル・SHMはジャーナルの設定によっては作られない。
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            // 前の計測のファイルが残ると、次の計測がそれを読んで結果が変わるため、計測を止める。
+            Err(err) => {
+                return Err(io::Error::new(
+                    err.kind(),
+                    format!(
+                        "前の計測のデータベースを消せなかった ({}): {err}",
+                        file.display()
+                    ),
+                ));
+            }
+        }
     }
+    Ok(())
 }
 
 fn time(f: impl FnOnce()) -> Duration {
