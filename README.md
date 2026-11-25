@@ -18,6 +18,7 @@ Nonotoは、正本を手元の端末に置くローカルファーストなド�
 | `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)           |
 | `spikes/crdt-comparison`      | 本文を持つCRDTのライブラリ (yrs・Automerge・Loro) を比べるコード  |
 | `spikes/crypto-comparison`    | 暗号の部品のライブラリの系統 (RustCrypto・libcrux) を比べるコード |
+| `spikes/sync-relay`           | 同期の形式を確かめる検証用の中継 (メモリの上で動く)               |
 
 ## 開発コンテナでの開発
 
@@ -35,6 +36,7 @@ make build-crypto-comparison-windows # Windows向けに暗号の部品の比較�
 make measure-sqlite3mc               # sqlite3mcとSQLCipherを同じ条件で計測する
 make measure-crdt-comparison         # CRDTのライブラリの候補を同じ文書で計測する
 make measure-crypto-comparison       # 暗号の部品の系統に必須の条件を当て、同じ操作で計測する
+make measure-sync-relay              # 暗号化と署名を挟んだ同期のレコードを、5000行の文書で計測する
 make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
 make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
 make repeat-test                     # テストを繰り返し、失敗した回の出力を tmp/repeat-test/ に残す
@@ -150,6 +152,22 @@ make measure-crypto-comparison CRYPTO_RUNS=100  # 回数を変えて計測する
 cargo build --release --locked -p crypto-comparison --no-default-features --features rustcrypto
 cargo build --release --locked -p crypto-comparison --no-default-features --features libcrux
 ```
+
+## 同期のレコードを計測する
+
+暗号化と署名を挟んだ同期のレコード (`spikes/sync-relay`) の、時間と大きさを計ります。
+
+```sh
+make measure-sync-relay                                # 5000行の文書で、それぞれ1000回計測する
+make measure-sync-relay LINES=1000 SYNC_RUNS=100       # 行数と回数を変えて計測する
+```
+
+文書は、CRDTのライブラリの計測と同じ入力の列で作ります。
+手元の編集1件 (1文字の入力) を、更新の取り出し・著者の署名・暗号化・書き込みの署名まで済ませる時間と、届いた更新1件を確かめて当てるまでの時間 (中央値・p99・最大) を表に並べます。
+続けて、更新1件・スナップショット・版の記録・メンバー4人の世代の記録の大きさと、暗号化と署名で増えた分を表に並べます。
+さらに、版を2つ付けた本文のログをまとめたスナップショットの大きさを、版の中身の残し方 (版より前の履歴を残す・版の時点の中身を別に持つ) ごとに表に並べます。
+最後に、必須の条件 (どちらの時間もp99で5ms以内) を満たしたかを示します。
+結果はMarkdownで標準出力に書きます。
 
 ## Macで確かめる
 

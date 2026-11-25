@@ -88,6 +88,13 @@ CRYPTO_RUNS ?= 1000
 measure-crypto-comparison:
 	@cargo run --release --locked -p crypto-comparison -- --runs $(CRYPTO_RUNS)
 
+# 暗号化と署名を挟んだ同期のレコードを、5000行の文書で計測する。行数は LINES、回数は SYNC_RUNS で変えられる (既定は5000行・1000回)。
+SYNC_RUNS ?= 1000
+
+.PHONY: measure-sync-relay
+measure-sync-relay:
+	@cargo run --release --locked -p sync-relay -- --lines $(LINES) --runs $(SYNC_RUNS)
+
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop
 screenshot-desktop:

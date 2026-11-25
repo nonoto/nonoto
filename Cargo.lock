@@ -8664,6 +8664,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-relay"
+version = "0.1.0"
+dependencies = [
+ "crdt-comparison",
+ "nonoto-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

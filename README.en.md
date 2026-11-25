@@ -22,6 +22,7 @@ The Japanese [README.md](./README.md) is the canonical version, and this file is
 | `spikes/sqlite3mc-comparison` | Code comparing SQLCipher and sqlite3mc (outside the workspace)           |
 | `spikes/crdt-comparison`      | Code comparing CRDT libraries for page bodies (yrs, Automerge, Loro)     |
 | `spikes/crypto-comparison`    | Code comparing cryptographic library families (RustCrypto, libcrux)      |
+| `spikes/sync-relay`           | A relay for verifying the sync format (runs in memory)                   |
 
 ## Developing in the dev container
 
@@ -39,6 +40,7 @@ make build-crypto-comparison-windows # Build the cryptographic library compariso
 make measure-sqlite3mc               # Benchmark sqlite3mc and SQLCipher under the same conditions
 make measure-crdt-comparison         # Benchmark the CRDT library candidates on the same document
 make measure-crypto-comparison       # Check and benchmark the cryptographic library families with the same operations
+make measure-sync-relay              # Benchmark encrypted and signed sync records on a 5,000-line document
 make screenshot-desktop              # Start the desktop app on a virtual display and save the screen to tmp/
 make screenshot-editor               # Open the Markdown syntax sample in the editor and save light and dark screens to tmp/
 make repeat-test                     # Repeat a test and keep the output of failed runs in tmp/repeat-test/
@@ -154,6 +156,22 @@ Building with only one family lets you compare the number of dependencies and th
 cargo build --release --locked -p crypto-comparison --no-default-features --features rustcrypto
 cargo build --release --locked -p crypto-comparison --no-default-features --features libcrux
 ```
+
+## Benchmarking the sync records
+
+Measures the time and size of sync records with encryption and signatures (`spikes/sync-relay`).
+
+```sh
+make measure-sync-relay                                # Measure 1,000 times each on a 5,000-line document
+make measure-sync-relay LINES=1000 SYNC_RUNS=100       # Measure with a different number of lines and runs
+```
+
+The document is built from the same input sequence as the CRDT library benchmark.
+A table lists the time to take one local edit (typing one character) through extracting the update, the author signature, encryption, and the write signature, and the time to check and apply one received update (median, p99, and maximum).
+Another table lists the sizes of one update, a snapshot, a version record, and a generation record for four members, and how much encryption and signatures add.
+A third table lists the size of a snapshot that compacts a body log with two versions, for each way of keeping version contents (keeping the history before the versions, or storing the contents at each version separately).
+Finally, it shows whether the required condition (both times within 5 ms at p99) was met.
+The results are written to standard output as Markdown.
 
 ## Checking on a Mac
 
