@@ -8,15 +8,25 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use loro::event::{Diff, DiffEvent};
-use loro::{ContainerTrait, EncodedBlobMode, ExportMode, LoroDoc, LoroText, TextDelta};
+use loro::{
+    ContainerTrait, EncodedBlobMode, ExportMode, Frontiers, LoroDoc, LoroMap, LoroText, TextDelta,
+};
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
+use crate::author::WriterId;
 use crate::error::Error;
 
 /// 本文を入れるルートのコンテナの名前。ルートのコンテナは名前で決まるため、どの複製でも同じコンテナを指す。
 const BODY: &str = "body";
 
+/// 本文以外の値 (タイトル) を入れるルートのコンテナの名前。
+const META: &str = "meta";
+
+/// タイトルを入れるキー。値は1つの文字列で、同時に変えたら最後に書いたほうが残る (ADR #0006)。
+const TITLE: &str = "title";
+
 /// ほかの端末へ送る、文書の変更。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
 pub struct Update(Vec<u8>);
 
 impl Update {
@@ -29,8 +39,35 @@ impl Update {
     }
 }
 
+impl fmt::Debug for Update {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Update")
+            .field("len", &self.0.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// 更新が、指定した書き手の操作だけを含むことを確かめる。
+///
+/// 取り込みと同じ読み方で変更を読み出し、書き手の範囲を調べる。
+/// この文書が出力する更新の形式でなければ [`Error::InvalidUpdate`] を返す。
+pub(crate) fn check_update_writer(bytes: &[u8], writer: WriterId) -> Result<(), Error> {
+    let meta = LoroDoc::decode_import_blob_meta(bytes, true).map_err(|_| Error::InvalidUpdate)?;
+    if meta.mode != EncodedBlobMode::Updates {
+        return Err(Error::InvalidUpdate);
+    }
+    let writers = meta.partial_end_vv;
+    if !writers.contains_key(&writer.value()) {
+        return Err(Error::WriterIdMismatch);
+    }
+    if writers.len() != 1 {
+        return Err(Error::ForeignOperations);
+    }
+    Ok(())
+}
+
 /// 履歴を含む文書の全体。同じ文書を別の端末で開くときに渡す。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
 pub struct Snapshot(Vec<u8>);
 
 impl Snapshot {
@@ -41,6 +78,82 @@ impl Snapshot {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+}
+
+impl fmt::Debug for Snapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Snapshot")
+            .field("len", &self.0.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// 文書のある時点を指す版の値。Loroの版の値 (`Frontiers`) を符号化したバイト列で持つ。
+///
+/// 書き手のIDと番号を並べたもので、書き手のIDを含むため、平文に置かず版の記録の中身に入れる (ADR #0009)。
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
+pub struct Version(Vec<u8>);
+
+impl fmt::Debug for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Version").finish_non_exhaustive()
+    }
+}
+
+impl Version {
+    /// バイト列を版の値として包む。受信の検査や文書で使うときに形式を確かめる。
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    /// Loroが符号化した、文書の時点を指すバイト列を借りる。
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// 文書の履歴を必要とせず、版の値の形式を確かめる。
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.frontiers().map(|_| ())
+    }
+
+    fn frontiers(&self) -> Result<Frontiers, Error> {
+        let frontiers = Frontiers::decode(&self.0).map_err(|_| Error::InvalidVersion)?;
+        if frontiers
+            .iter()
+            .any(|id| !(0..i32::MAX).contains(&id.counter) || id.peer == u64::MAX)
+        {
+            return Err(Error::InvalidVersion);
+        }
+        // デコードは余ったバイトを受け入れるため、正規の符号化と照らす。
+        let encoded = Zeroizing::new(frontiers.encode());
+        if encoded.as_slice() != self.as_bytes() {
+            return Err(Error::InvalidVersion);
+        }
+        Ok(frontiers)
+    }
+}
+
+/// 版の時点のタイトルと本文。デバッグ表示では伏せ、破棄するとバッファを消す。
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
+pub struct VersionContent {
+    /// その時点のタイトル。
+    pub title: String,
+    /// その時点の本文。
+    pub body: String,
+}
+
+impl fmt::Debug for VersionContent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VersionContent").finish_non_exhaustive()
+    }
+}
+
+/// 本文以外の値のコンテナからタイトルを読む。文字列でなければ空文字列として扱う。
+fn read_title(meta: &LoroMap) -> String {
+    meta.get(TITLE)
+        .and_then(|value| value.into_value().ok())
+        .and_then(|value| value.into_string().ok())
+        .map_or_else(String::new, |title| title.to_string())
 }
 
 /// 本文の1か所の置き換え。`range` を `text` に置き換える。
@@ -91,14 +204,21 @@ pub fn map_position(mut pos: usize, replacements: &[Replacement], affinity: Affi
     pos
 }
 
-/// ページ1件の本文を持つ文書。
+/// ページ1件のタイトルと本文を持つ文書。
 ///
-/// デバッグ表示では本文を伏せる。
+/// デバッグ表示ではタイトルと本文を伏せる。文書を破棄するとき、手元に保持する文字列のバッファを消す。
+#[derive(ZeroizeOnDrop)]
 pub struct Document {
+    #[zeroize(skip)]
     doc: LoroDoc,
+    #[zeroize(skip)]
     text: LoroText,
+    #[zeroize(skip)]
+    meta: LoroMap,
     /// 今の本文。Loroの差分はコードポイントで数えるため、届いた差分をバイト位置にするのにも使う。
     body: String,
+    /// 今のタイトル。
+    title: String,
 }
 
 impl fmt::Debug for Document {
@@ -139,13 +259,95 @@ impl Document {
 
     fn with_doc(doc: LoroDoc) -> Self {
         let text = doc.get_text(BODY);
+        let meta = doc.get_map(META);
         let body = text.to_string();
-        Self { doc, text, body }
+        let title = read_title(&meta);
+        Self {
+            doc,
+            text,
+            meta,
+            body,
+            title,
+        }
     }
 
     /// 今の本文を返す。
     pub fn text(&self) -> &str {
         &self.body
+    }
+
+    /// 今のタイトルを返す。まだ付けていなければ空文字列を返す。
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// 手元でタイトルを変え、ほかの端末へ送る更新を返す。タイトルが変わらなければ `None` を返す。
+    pub fn set_title(&mut self, title: &str) -> Result<Option<Update>, Error> {
+        if self.title == title {
+            return Ok(None);
+        }
+        let before = self.doc.oplog_vv();
+        self.meta
+            .insert(TITLE, title)
+            .map_err(|_| Error::DocumentEdit)?;
+        self.doc.commit();
+        title.clone_into(&mut self.title);
+        self.doc
+            .export(ExportMode::updates(&before))
+            .map(|bytes| Some(Update(bytes)))
+            .map_err(|_| Error::DocumentExport)
+    }
+
+    /// これから手元で書く操作の書き手のIDを設定する。
+    ///
+    /// 書き手のIDは、利用者の署名の公開鍵と書き始めるときの乱数から導く ([`crate::Writer`])。
+    pub fn set_writer(&mut self, writer: WriterId) -> Result<(), Error> {
+        self.doc
+            .set_peer_id(writer.value())
+            .map_err(|_| Error::InvalidWriterId)
+    }
+
+    /// 今の時点を指す版の値を返す。
+    pub fn version(&self) -> Version {
+        Version(self.doc.oplog_frontiers().encode())
+    }
+
+    /// 版の時点のタイトルと本文を取り出す。
+    ///
+    /// 版の値の形が正しくなければ [`Error::InvalidVersion`]、
+    /// この文書がその版までの操作を持っていなければ [`Error::VersionNotFound`] を返す。
+    pub fn content_at(&self, version: &Version) -> Result<VersionContent, Error> {
+        let doc = self.fork_doc_at(version)?;
+        Ok(VersionContent {
+            title: read_title(&doc.get_map(META)),
+            body: doc.get_text(BODY).to_string(),
+        })
+    }
+
+    /// 版から分岐した、別の文書 (編集提案の枝) を作る。
+    ///
+    /// 枝は版までの履歴を持ち、枝で書いた更新は、本文の文書にもそのまま当てられる。
+    /// 受信した版を基準にするときは [`crate::CheckedVersion::fork`] で中身を確かめる。
+    /// 書く前に [`Document::set_writer`] で書き手のIDを設定する。
+    pub fn fork_at(&self, version: &Version) -> Result<Self, Error> {
+        self.fork_doc_at(version).map(Self::with_doc)
+    }
+
+    fn fork_doc_at(&self, version: &Version) -> Result<LoroDoc, Error> {
+        let frontiers = self.require_version(version)?;
+        self.doc
+            .fork_at(&frontiers)
+            .map_err(|_| Error::VersionNotFound)
+    }
+
+    /// 指定した時点までの操作が文書に当たっていれば、その時点を指す値を返す。
+    pub(crate) fn require_version(&self, version: &Version) -> Result<Frontiers, Error> {
+        let frontiers = version.frontiers()?;
+        let applied = self.doc.state_vv();
+        if frontiers.iter().any(|id| !applied.includes_id(id)) {
+            return Err(Error::VersionNotFound);
+        }
+        Ok(frontiers)
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, Error> {
@@ -198,12 +400,42 @@ impl Document {
     /// 更新は、順不同でも、同じ更新が重ねて届いてもよい。
     /// 前の更新が届いていない更新は文書の中に保留され、前の更新が届いたときに、両方の変更を返す。
     /// この文書が出力する更新の形式を受け付け、形式が違う入力では文書を変えない。
+    /// タイトルの変更は置き換えの列に含めず、当てたあとの [`Document::title`] で読む。
     pub fn apply_remote(&mut self, update: &Update) -> Result<Vec<Replacement>, Error> {
         let meta = LoroDoc::decode_import_blob_meta(update.as_bytes(), true)
             .map_err(|_| Error::InvalidUpdate)?;
         if meta.mode != EncodedBlobMode::Updates {
             return Err(Error::InvalidUpdate);
         }
+        self.import(update.as_bytes())
+    }
+
+    /// 履歴をすべて持つスナップショットを、この文書に合わせる。
+    ///
+    /// まとめたスナップショット ([`crate::CheckedSnapshot`]) を、手元の編集を持つ文書に取り込むのに使う。
+    /// スナップショットにある操作とこの文書の操作の和になり、手元で書いた更新はそのまま送れる。
+    /// 履歴を省いたスナップショットと、形式が違う入力では文書を変えない。
+    pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<Vec<Replacement>, Error> {
+        let other = Self::from_snapshot(snapshot)?;
+        let updates = other
+            .doc
+            .export(ExportMode::all_updates())
+            .map_err(|_| Error::DocumentExport)?;
+        self.import(&updates)
+    }
+
+    /// 今の時点より前の履歴を省いたスナップショットを出力する。
+    ///
+    /// 版の中身を別に持つまとめ (ADR #0010の大きさの比較) にだけ使う。
+    /// 省いた文書は、省いた時点より前から分かれた更新を当てられないため、[`Document::from_snapshot`] は読まない。
+    pub(crate) fn shallow_snapshot(&self) -> Result<Snapshot, Error> {
+        self.doc
+            .export(ExportMode::shallow_snapshot(&self.doc.oplog_frontiers()))
+            .map(Snapshot)
+            .map_err(|_| Error::DocumentExport)
+    }
+
+    fn import(&mut self, bytes: &[u8]) -> Result<Vec<Replacement>, Error> {
         let ops = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&ops);
         let subscription = self.doc.subscribe(
@@ -217,13 +449,14 @@ impl Document {
                 }
             }),
         );
-        let result = self.doc.import(update.as_bytes());
+        let result = self.doc.import(bytes);
         drop(subscription);
         result.map_err(|_| Error::InvalidUpdate)?;
 
         let deltas = std::mem::take(&mut *ops.lock().unwrap_or_else(PoisonError::into_inner));
         let replacements = replacements_from_deltas(&self.body, deltas);
         self.body = Replacement::apply_all(&self.body, &replacements);
+        self.title = read_title(&self.meta);
         Ok(replacements)
     }
 }
@@ -368,6 +601,27 @@ mod tests {
         assert!(
             !format!("{document:?}").contains(body),
             "文書のデバッグ表示に本文が含まれている"
+        );
+    }
+
+    #[test]
+    fn 更新とスナップショットのデバッグ表示には長さだけを出す() {
+        let mut document = Document::new("テスト用の本文").expect("文書を作れなかった");
+        let update = document
+            .set_title("テスト用のタイトル")
+            .expect("タイトルを変えられなかった")
+            .expect("タイトルの更新を取り出せなかった");
+        let snapshot = document.snapshot().expect("スナップショットを作れなかった");
+
+        assert_eq!(
+            format!("{update:?}"),
+            format!("Update {{ len: {}, .. }}", update.as_bytes().len()),
+            "更新のデバッグ表示に長さ以外の値が出た",
+        );
+        assert_eq!(
+            format!("{snapshot:?}"),
+            format!("Snapshot {{ len: {}, .. }}", snapshot.as_bytes().len()),
+            "スナップショットのデバッグ表示に長さ以外の値が出た",
         );
     }
 
@@ -939,5 +1193,116 @@ mod tests {
         assert_eq!(map_position(6, &replacements, Affinity::Before), 3);
         assert_eq!(map_position(6, &replacements, Affinity::After), 4);
         assert_eq!(map_position(3, &replacements, Affinity::Before), 3);
+    }
+
+    #[test]
+    fn タイトルを本文とは別の値として持ちスナップショットに残す() {
+        let mut document = Document::new("本文").expect("文書を作れなかった");
+        assert_eq!(document.title(), "", "タイトルを付ける前の値が空ではない");
+
+        assert!(
+            document
+                .set_title("はじめに")
+                .expect("タイトルを変えられなかった")
+                .is_some(),
+            "タイトルが変わったのに更新が無い",
+        );
+        assert!(
+            document
+                .set_title("はじめに")
+                .expect("タイトルを変えられなかった")
+                .is_none(),
+            "タイトルが変わらないのに更新を出した",
+        );
+        let reopened = Document::from_snapshot(
+            &document
+                .snapshot()
+                .expect("スナップショットを書き出せなかった"),
+        )
+        .expect("スナップショットから読み込めなかった");
+
+        assert_eq!(
+            reopened.title(),
+            "はじめに",
+            "スナップショットにタイトルが残らなかった"
+        );
+        assert_eq!(reopened.text(), "本文", "タイトルを変えて本文が変わった");
+    }
+
+    #[test]
+    fn 同時に変えたタイトルはどの複製でも同じ1つの値になる() {
+        let base = Document::new("")
+            .and_then(|document| document.snapshot())
+            .expect("最初の文書を作れなかった");
+        let mut a = Document::from_snapshot(&base).expect("文書を開けなかった");
+        let mut b = Document::from_snapshot(&base).expect("文書を開けなかった");
+
+        let from_a = a
+            .set_title("Aのタイトル")
+            .expect("タイトルを変えられなかった")
+            .expect("タイトルが変わったのに更新が無い");
+        let from_b = b
+            .set_title("Bのタイトル")
+            .expect("タイトルを変えられなかった")
+            .expect("タイトルが変わったのに更新が無い");
+        a.apply_remote(&from_b).expect("Bの更新を当てられなかった");
+        b.apply_remote(&from_a).expect("Aの更新を当てられなかった");
+
+        assert_eq!(
+            a.title(),
+            b.title(),
+            "同時に変えたタイトルが複製ごとに食い違った"
+        );
+        assert!(
+            ["Aのタイトル", "Bのタイトル"].contains(&a.title()),
+            "同時に変えたタイトルが、どちらの値でもない: {}",
+            a.title(),
+        );
+    }
+
+    #[test]
+    fn 履歴をすべて持つスナップショットを手元の編集を持つ文書に合わせられ_履歴を省いたものは拒む() {
+        let mut local = Document::new("最初。").expect("文書を作れなかった");
+        let mut other = Document::from_snapshot(
+            &local
+                .snapshot()
+                .expect("スナップショットを出力できなかった"),
+        )
+        .expect("スナップショットから文書を作れなかった");
+        other
+            .apply_local(0..0, "相手。")
+            .expect("文書を書けなかった");
+        let end = local.text().len();
+        local
+            .apply_local(end..end, "手元。")
+            .expect("文書を書けなかった");
+
+        let before = local.text().to_owned();
+        let trimmed = other
+            .shallow_snapshot()
+            .expect("履歴を省いたスナップショットを出力できなかった");
+        assert!(
+            matches!(local.apply_snapshot(&trimmed), Err(Error::InvalidSnapshot)),
+            "履歴を省いたスナップショットを合わせた",
+        );
+        assert_eq!(
+            local.text(),
+            before,
+            "拒んだスナップショットで文書が変わった"
+        );
+
+        let replacements = local
+            .apply_snapshot(
+                &other
+                    .snapshot()
+                    .expect("スナップショットを出力できなかった"),
+            )
+            .expect("スナップショットを合わせられなかった");
+        assert_eq!(local.text(), "相手。最初。手元。", "合わせた本文が異なる");
+        assert_eq!(
+            Replacement::apply_all(&before, &replacements),
+            local.text(),
+            "置き換えの列を当てた本文が、合わせた本文と異なる",
+        );
     }
 }

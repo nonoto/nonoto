@@ -2,30 +2,63 @@
 //!
 //! 各OSのクライアントとサーバーから共有するため、UIとCLIのクレートには依存しない。
 
+mod author;
 mod clock;
+mod compaction;
+mod crypto;
 mod document;
 mod editing;
+mod envelope;
 mod error;
+mod generation;
 mod key;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 mod keychain;
+mod member;
 mod page;
 mod pages;
+mod receive;
+mod record;
 mod store;
+mod sync;
+mod version;
 mod wikilink;
 
 use std::path::{Path, PathBuf};
 
+pub use author::{Writer, WriterId, WriterNonce};
 pub use clock::{Clock, SystemClock};
-pub use document::{Affinity, Document, Replacement, Snapshot, Update, map_position};
+pub use compaction::{CheckedSnapshot, VersionRetention, check_snapshot};
+pub use crypto::{
+    Suite, TopicKey, UserSigningKey, UserVerifyingKey, WrapPublicKey, WrapSecretKey,
+    WriteSigningKey, WriteVerifyingKey,
+};
+pub use document::{
+    Affinity, Document, Replacement, Snapshot, Update, Version, VersionContent, map_position,
+};
 pub use editing::{TextEdit, continue_list, indent, outdent};
+pub use envelope::Envelope;
 pub use error::{Error, OpenStage};
+pub use generation::{GenerationHeader, GenerationKeys, GenerationRecord, RoleKeys, WriteKeys};
 pub use key::{FileKeyStore, Key, KeyStore};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use keychain::KeychainKeyStore;
+pub use member::{Member, MemberId, Membership, Role, UserKeys, UserPublicKeys};
 pub use page::{NewPage, Page, PageId, PageSummary, PageUpdate};
 pub use pages::Pages;
+pub use receive::{
+    CheckedEntry, CheckedUpdate, CheckedVersion, GenerationView, check_log_entry, check_log_record,
+};
+pub use record::{
+    Branch, BranchId, RecordHeader, RecordKind, RecordPayload, SealedRecord, SyncPageId, TopicId,
+    VerifiedRecord, WriteKeyRole,
+};
 pub use store::{PageStore, SqlCipherStore};
+pub use sync::{
+    CLIENT_VERSION, Incoming, MembershipChange, Outgoing, PageChange, RejectReason, RequestId,
+    SnapshotInfo, Step, SuitePolicy, SyncClient,
+};
+pub use version::ContentHash;
 pub use wikilink::{Wikilink, WikilinkQuery, complete_wikilink, find_wikilinks, wikilink_query};
 
 /// データベースのファイル名。
