@@ -1,0 +1,61 @@
+[package]
+name = "crypto-comparison"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# 系統ごとに分け、片方だけを入れたビルドで、依存の数とバイナリの大きさを計れるようにする。
+[features]
+default = ["rustcrypto", "libcrux"]
+rustcrypto = [
+  "dep:aes-gcm",
+  "dep:chacha20",
+  "dep:chacha20poly1305",
+  "dep:ed25519-dalek",
+  "dep:hkdf",
+  "dep:hpke",
+  "dep:sha2",
+]
+libcrux = [
+  "dep:hpke-rs",
+  "dep:hpke-rs-libcrux",
+  "dep:libcrux-aead",
+  "dep:libcrux-ed25519",
+  "dep:libcrux-hkdf",
+  "dep:libcrux-traits",
+]
+
+[dependencies]
+aes-gcm = { version = "0.11.1", features = ["zeroize"], optional = true }
+chacha20 = { workspace = true, features = ["rng", "zeroize"], optional = true }
+chacha20poly1305 = { workspace = true, features = ["zeroize"], optional = true }
+ed25519-dalek = { workspace = true, optional = true }
+getrandom.workspace = true
+hkdf = { workspace = true, optional = true }
+hpke = { workspace = true, features = ["alloc", "chacha", "getrandom", "mlkem", "x25519"], optional = true }
+hpke-rs = { version = "0.8.1", features = ["hazmat"], optional = true }
+hpke-rs-libcrux = { version = "0.8.1", optional = true }
+libcrux-aead = { version = "0.0.11", optional = true }
+libcrux-ed25519 = { version = "0.0.11", optional = true }
+libcrux-hkdf = { version = "0.0.10", optional = true }
+libcrux-traits = { version = "0.0.10", optional = true }
+serde_json.workspace = true
+sha2 = { workspace = true, features = ["zeroize"], optional = true }
+thiserror.workspace = true
+zeroize.workspace = true
+
+# テストは2つの系統を並べて確かめるため、両方を有効にしたときだけ組む。
+[[test]]
+name = "conformance"
+required-features = ["rustcrypto", "libcrux"]
+
+[[test]]
+name = "debug"
+required-features = ["rustcrypto", "libcrux"]
+
+[[test]]
+name = "measure"
+required-features = ["rustcrypto", "libcrux"]
+
+[lints]
+workspace = true

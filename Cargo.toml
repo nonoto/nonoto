@@ -12,13 +12,20 @@ publish = false
 # 2つ以上の場所で使う依存のバージョンを、ここで1か所に持つ。
 # 各クレートは `workspace = true` で引き継ぎ、フィーチャーは使うクレートの側に書く。
 [workspace.dependencies]
+chacha20 = { version = "0.10.2", default-features = false }
+chacha20poly1305 = "0.11.0"
+ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
 gpui-kit = "=0.9.1"
+hkdf = "0.13.0"
+hpke = { version = "0.15.1", default-features = false }
 jiff = "0.2.43"
 keyring-core = "1.0.1"
 loro = "1.17.1"
 nonoto-core = { path = "crates/nonoto-core" }
 rusqlite = "0.42.0"
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 zeroize = "1.9.1"
