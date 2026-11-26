@@ -1,0 +1,18 @@
+[package]
+name = "sync-relay"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 計測の文書を、同時編集の技術検証の計測と同じ入力の列で作る (`measure`)。
+crdt-comparison = { path = "../crdt-comparison" }
+nonoto-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# 方式と形式の切り替えのテストで、テストだけの2つ目の方式を使う。
+nonoto-core = { workspace = true, features = ["test-suite"] }
+
+[lints]
+workspace = true

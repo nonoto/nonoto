@@ -5,13 +5,20 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+# chacha20・chacha20poly1305・ed25519-dalek・hkdf・hpke・sha2は、同期のレコードの暗号化と署名と鍵の包み (`crypto`) に使う。
+chacha20 = { workspace = true, features = ["rng", "zeroize"] }
+chacha20poly1305 = { workspace = true, features = ["zeroize"] }
 dirs = "7.0.0"
-getrandom = "0.4.3"
+ed25519-dalek.workspace = true
+getrandom = { workspace = true, features = ["sys_rng"] }
+hkdf.workspace = true
+hpke = { workspace = true, features = ["alloc", "chacha", "mlkem", "x25519"] }
 jiff.workspace = true
 # ページの本文をCRDTで持つ文書 (`document`) に使う。
 loro.workspace = true
 pulldown-cmark = { version = "0.13.6", default-features = false }
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+sha2 = { workspace = true, features = ["zeroize"] }
 thiserror.workspace = true
 uuid = { version = "1.29.2", features = ["v7"] }
 zeroize = { workspace = true, features = ["zeroize_derive"] }
@@ -23,6 +30,10 @@ keyring-core.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring-core.workspace = true
 windows-native-keyring-store = "1.1.0"
+
+[features]
+# 方式と形式の切り替えを確かめるテストだけで使う、2つ目の方式 (`Suite::TestSecond`) を足す。本番のビルドでは有効にしない。
+test-suite = []
 
 [dev-dependencies]
 keyring-core.workspace = true

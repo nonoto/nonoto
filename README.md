@@ -1,4 +1,4 @@
-<!-- last_synced: 2026-11-18 -->
+<!-- last_synced: 2026-11-25 -->
 
 # Nonoto
 
@@ -9,14 +9,16 @@ Nonotoは、正本を手元の端末に置くローカルファーストなド�
 
 ## 構成
 
-| ディレクトリ                  | 内容                                                             |
-| ----------------------------- | ---------------------------------------------------------------- |
-| `crates/nonoto-core`          | ページの操作・端末上の暗号化ストア・鍵の保管                     |
-| `crates/nonoto-cli`           | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON)   |
-| `crates/nonoto-desktop`       | GPUIのデスクトップアプリ                                         |
-| `spikes/store-comparison`     | 暗号化ストアの方式を比べるコード                                 |
-| `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)          |
-| `spikes/crdt-comparison`      | 本文を持つCRDTのライブラリ (yrs・Automerge・Loro) を比べるコード |
+| ディレクトリ                  | 内容                                                              |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `crates/nonoto-core`          | ページの操作・端末上の暗号化ストア・鍵の保管                      |
+| `crates/nonoto-cli`           | コマンド `nonoto` (ページの作成・一覧・取得・更新。出力はJSON)    |
+| `crates/nonoto-desktop`       | GPUIのデスクトップアプリ                                          |
+| `spikes/store-comparison`     | 暗号化ストアの方式を比べるコード                                  |
+| `spikes/sqlite3mc-comparison` | SQLCipherとsqlite3mcを比べるコード (ワークスペースの外)           |
+| `spikes/crdt-comparison`      | 本文を持つCRDTのライブラリ (yrs・Automerge・Loro) を比べるコード  |
+| `spikes/crypto-comparison`    | 暗号の部品のライブラリの系統 (RustCrypto・libcrux) を比べるコード |
+| `spikes/sync-relay`           | 同期の形式を確かめる検証用の中継 (メモリの上で動く)               |
 
 ## 開発コンテナでの開発
 
@@ -30,8 +32,11 @@ make build-core-windows              # Windows向けにコアをビルドする
 make build-store-comparison-windows  # Windows向けに暗号化ストアの計測のコードをビルドする
 make build-sqlite3mc-windows         # Windows向けにsqlite3mcの比較のコードをビルドする
 make build-crdt-comparison-windows   # Windows向けにCRDTのライブラリの比較のコードをビルドする
+make build-crypto-comparison-windows # Windows向けに暗号の部品の比較のコードをビルドする
 make measure-sqlite3mc               # sqlite3mcとSQLCipherを同じ条件で計測する
 make measure-crdt-comparison         # CRDTのライブラリの候補を同じ文書で計測する
+make measure-crypto-comparison       # 暗号の部品の系統に必須の条件を当て、同じ操作で計測する
+make measure-sync-relay              # 暗号化と署名を挟んだ同期のレコードを、5000行の文書で計測する
 make screenshot-desktop              # 仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/ に保存する
 make screenshot-editor               # 記法の見本のページを編集の画面で開き、ライトとダークの画面を tmp/ に保存する
 make repeat-test                     # テストを繰り返し、失敗した回の出力を tmp/repeat-test/ に残す
@@ -126,6 +131,43 @@ make measure-crdt-comparison LINES=1000  # 行数を変えて計測する
 結果はMarkdownで標準出力に書き、編集1件の適用・読み込みの時間と、更新・スナップショット・版を指す値の大きさ・読み込みで増えたメモリを1つの表に並べます。
 最後の「必須の条件」の表に、候補ごとに条件 (編集1件の適用が5ms以内・読み込みが100ms以内) を満たしたかを示します。
 開発コンテナでは、5000行で1分ほどかかります。
+
+## 暗号の部品を計測する
+
+暗号の部品 (HPKE・Ed25519・AEAD・HKDF) のライブラリの系統 (RustCrypto・libcrux) に、同じ操作を当てて比べます。
+
+```sh
+make measure-crypto-comparison                  # 操作ごとに1000回計測する
+make measure-crypto-comparison CRYPTO_RUNS=100  # 回数を変えて計測する
+```
+
+最初の「必須の条件」の表に、系統ごとに条件 (規格の試験ベクトルの答え・往復・1ビットの書き換えの拒否) を満たしたかを示します。
+続けて、操作ごとの時間 (中央値・p99・最大)・鍵と暗号文と署名の大きさ・Ed25519の確かめで受け付ける署名の範囲・系統の間の受け渡し・AEADのnonceの長さを表に並べます。
+結果はMarkdownで標準出力に書きます。
+試験ベクトルは `spikes/crypto-comparison/src/vectors/` に置き、出典は `spikes/crypto-comparison/src/conformance.rs` の先頭に書いています。
+
+片方の系統だけを入れてビルドすると、系統ごとの依存の数とバイナリの大きさを比べられます。
+
+```sh
+cargo build --release --locked -p crypto-comparison --no-default-features --features rustcrypto
+cargo build --release --locked -p crypto-comparison --no-default-features --features libcrux
+```
+
+## 同期のレコードを計測する
+
+暗号化と署名を挟んだ同期のレコード (`spikes/sync-relay`) の、時間と大きさを計ります。
+
+```sh
+make measure-sync-relay                                # 5000行の文書で、それぞれ1000回計測する
+make measure-sync-relay LINES=1000 SYNC_RUNS=100       # 行数と回数を変えて計測する
+```
+
+文書は、CRDTのライブラリの計測と同じ入力の列で作ります。
+手元の編集1件 (1文字の入力) を、更新の取り出し・著者の署名・暗号化・書き込みの署名まで済ませる時間と、届いた更新1件を確かめて当てるまでの時間 (中央値・p99・最大) を表に並べます。
+続けて、更新1件・スナップショット・版の記録・メンバー4人の世代の記録の大きさと、暗号化と署名で増えた分を表に並べます。
+さらに、版を2つ付けた本文のログをまとめたスナップショットの大きさを、版の中身の残し方 (版より前の履歴を残す・版の時点の中身を別に持つ) ごとに表に並べます。
+最後に、必須の条件 (どちらの時間もp99で5ms以内) を満たしたかを示します。
+結果はMarkdownで標準出力に書きます。
 
 ## Macで確かめる
 

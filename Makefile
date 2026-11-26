@@ -55,6 +55,11 @@ build-store-comparison-windows:
 build-crdt-comparison-windows:
 	cargo build -p crdt-comparison --target $(WINDOWS_TARGET) --locked
 
+# 暗号の部品の比較のコードを、Windows向けにビルドする。
+.PHONY: build-crypto-comparison-windows
+build-crypto-comparison-windows:
+	cargo build -p crypto-comparison --target $(WINDOWS_TARGET) --locked
+
 # sqlite3mcにリンクする比較のコードを、Windows向けにビルドする。
 .PHONY: build-sqlite3mc-windows
 build-sqlite3mc-windows: fetch-sqlite3mc
@@ -75,6 +80,20 @@ measure-sqlite3mc: fetch-sqlite3mc
 .PHONY: measure-crdt-comparison
 measure-crdt-comparison:
 	cargo run --release --locked -p crdt-comparison -- --lines $(LINES)
+
+# 暗号の部品の系統 (RustCrypto・libcrux) に、必須の条件を当て、同じ操作で計測する。回数は CRYPTO_RUNS で変えられる (既定は1000)。
+CRYPTO_RUNS ?= 1000
+
+.PHONY: measure-crypto-comparison
+measure-crypto-comparison:
+	@cargo run --release --locked -p crypto-comparison -- --runs $(CRYPTO_RUNS)
+
+# 暗号化と署名を挟んだ同期のレコードを、5000行の文書で計測する。行数は LINES、回数は SYNC_RUNS で変えられる (既定は5000行・1000回)。
+SYNC_RUNS ?= 1000
+
+.PHONY: measure-sync-relay
+measure-sync-relay:
+	@cargo run --release --locked -p sync-relay -- --lines $(LINES) --runs $(SYNC_RUNS)
 
 # 開発コンテナの仮想ディスプレイでデスクトップアプリを起動し、画面を tmp/screenshot-desktop.png に保存する。
 .PHONY: screenshot-desktop
